@@ -25,11 +25,11 @@ criterion = { version = "0.5", features = ["html_reports"] }
 # `bulk_spawn`
 
 [[bench]]
-name = "spawn_iter"
+name = "spawn"
 harness = false
 
 [[bench]]
-name = "spawn_many_in_for_loop"
+name = "spawn_iter"
 harness = false
 
 # ---

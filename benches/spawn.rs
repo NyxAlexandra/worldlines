@@ -9,7 +9,7 @@ struct A(u32);
 struct B(u64);
 
 fn benchmark(c: &mut Criterion) {
-    c.benchmark_group("bulk_spawn").bench_function("spawn_many_in_for_loop", |bencher| {
+    c.benchmark_group("bulk_spawn").bench_function("spawn", |bencher| {
         bencher.iter(|| {
             let mut world = World::new();
 
