@@ -1,0 +1,43 @@
+[package]
+name = "archetypal-ecs"
+version = "0.1.0"
+edition = "2021"
+
+authors = ["Alexandra Reaves <nyxalexandra@proton.me>"]
+license = "MIT OR Apache-2.0"
+
+[features]
+default = ["derive"]
+#! Enables derive macros for traits.
+derive = ["dep:macros"]
+
+[dependencies]
+atomic_refcell = "0.1.13"
+dashmap = "6.0.1"
+thiserror = "1.0.63"
+
+macros = { path = "./macros", optional = true }
+indexmap = "2.4.0"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# `bulk_spawn`
+
+[[bench]]
+name = "spawn_iter"
+harness = false
+
+[[bench]]
+name = "spawn_many_in_for_loop"
+harness = false
+
+# ---
+
+[[bench]]
+name = "bulk_insert"
+harness = false
+
+[[bench]]
+name = "bulk_remove"
+harness = false
