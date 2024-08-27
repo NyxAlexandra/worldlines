@@ -283,7 +283,7 @@ impl EntitySlot {
     /// A new live entity slot.
     ///
     /// Starts at version `0` and without a table index.
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         Self { version: 0, alive: true, table: None }
     }
 }
