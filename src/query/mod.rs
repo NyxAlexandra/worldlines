@@ -5,15 +5,8 @@ pub use self::contains::*;
 pub use self::not::*;
 pub use self::or::*;
 use crate::{
-    EntityIterIds,
-    EntityPtr,
-    EntityRef,
-    ReadOnlySystemInput,
-    SystemInput,
-    World,
-    WorldAccess,
-    WorldAccessError,
-    WorldPtr,
+    EntityIterIds, EntityPtr, EntityRef, ReadOnlySystemInput, SystemInput, World,
+    WorldAccess, WorldAccessError, WorldPtr,
 };
 
 mod any_of;
@@ -141,7 +134,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let entity = self.world.entity(self.entities.next()?);
 
-        F::include(unsafe { entity.to_ref() })
+        F::include(unsafe { entity.as_ref() })
             .then(|| unsafe { D::fetch(entity) })
             .flatten()
             .or_else(|| self.next())

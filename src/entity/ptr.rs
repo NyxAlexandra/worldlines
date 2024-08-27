@@ -6,16 +6,8 @@ use std::{fmt, ptr};
 use thiserror::Error;
 
 use crate::{
-    Component,
-    Entity,
-    QueryData,
-    ReadOnlyQueryData,
-    Table,
-    TableId,
-    TypeData,
-    World,
-    WorldAccess,
-    WorldPtr,
+    Component, Entity, QueryData, ReadOnlyQueryData, Table, TableId, TypeData, World,
+    WorldAccess, WorldPtr,
 };
 
 /// An immutable reference to an entity.
@@ -72,7 +64,7 @@ impl<'w> EntityPtr<'w> {
     ///
     /// - The entity must be alive.
     /// - The pointer must be valid to access this entity.
-    pub unsafe fn to_ref(self) -> EntityRef<'w> {
+    pub unsafe fn as_ref(self) -> EntityRef<'w> {
         EntityRef { inner: self }
     }
 
@@ -82,7 +74,7 @@ impl<'w> EntityPtr<'w> {
     ///
     /// - The entity must be alive.
     /// - The pointer must be valid to access this entity.
-    pub unsafe fn to_mut(self) -> EntityMut<'w> {
+    pub unsafe fn as_mut(self) -> EntityMut<'w> {
         EntityMut { inner: self }
     }
 
@@ -92,7 +84,7 @@ impl<'w> EntityPtr<'w> {
     ///
     /// - The entity must be alive.
     /// - The pointer must be valid to access the entire world mutably.
-    pub unsafe fn to_world(self) -> EntityWorld<'w> {
+    pub unsafe fn as_world(self) -> EntityWorld<'w> {
         EntityWorld { inner: self }
     }
 
@@ -281,7 +273,7 @@ unsafe impl QueryData for EntityRef<'_> {
     }
 
     unsafe fn fetch(entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
-        Some(unsafe { entity.to_ref() })
+        Some(unsafe { entity.as_ref() })
     }
 }
 
@@ -353,7 +345,7 @@ unsafe impl QueryData for EntityMut<'_> {
     }
 
     unsafe fn fetch(entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
-        Some(unsafe { entity.to_mut() })
+        Some(unsafe { entity.as_mut() })
     }
 }
 

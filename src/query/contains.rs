@@ -1,12 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::{
-    Component,
-    EntityPtr,
-    EntityRef,
-    QueryData,
-    QueryFilter,
-    ReadOnlyQueryData,
+    Component, EntityPtr, EntityRef, QueryData, QueryFilter, ReadOnlyQueryData,
     WorldAccess,
 };
 
@@ -36,7 +31,7 @@ unsafe impl<C: Component> QueryData for Contains<C> {
     unsafe fn fetch(entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
         // SAFETY: the pointer provided to [`QueryData::fetch`] must always be valid to
         // read metadata
-        Some(unsafe { entity.to_ref().contains::<C>() })
+        Some(unsafe { entity.as_ref().contains::<C>() })
     }
 }
 

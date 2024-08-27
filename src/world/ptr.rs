@@ -3,13 +3,7 @@ use std::marker::PhantomData;
 use std::{fmt, ptr};
 
 use crate::{
-    Components,
-    Entities,
-    Entity,
-    EntityPtr,
-    ReadOnlySystemInput,
-    SystemInput,
-    World,
+    Components, Entities, Entity, EntityPtr, ReadOnlySystemInput, SystemInput, World,
     WorldAccess,
 };
 
