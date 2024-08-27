@@ -21,10 +21,9 @@ pub trait Component: Send + Sync + 'static {}
 impl<C: Send + Sync + 'static> Component for C {}
 
 /// A unique identifer for a [`Component`].
-#[doc(hidden)]
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ComponentId(usize);
+struct ComponentId(usize);
 
 impl ComponentId {
     pub fn of<T: 'static>() -> Self {
