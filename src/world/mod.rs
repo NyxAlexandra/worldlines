@@ -5,10 +5,31 @@ use thiserror::Error;
 
 pub use self::ptr::*;
 use crate::{
-    array, Bundle, Components, Entities, EntitiesIter, EntitiesIterMut, Entity,
-    EntityMut, EntityNotFound, EntityRef, EntitySlot, EntityWorld, Query, QueryData,
-    QueryFilter, ReadOnlyQueryData, ReadOnlySystemInput, Res, ResMut, Resource,
-    ResourceError, Resources, SystemInput, WorldAccess, WorldAccessError,
+    array,
+    Bundle,
+    Components,
+    Entities,
+    EntitiesIter,
+    EntitiesIterMut,
+    Entity,
+    EntityMut,
+    EntityNotFound,
+    EntityRef,
+    EntitySlot,
+    EntityWorld,
+    Query,
+    QueryData,
+    QueryFilter,
+    ReadOnlyQueryData,
+    ReadOnlySystemInput,
+    Res,
+    ResMut,
+    Resource,
+    ResourceError,
+    Resources,
+    SystemInput,
+    WorldAccess,
+    WorldAccessError,
 };
 
 mod ptr;

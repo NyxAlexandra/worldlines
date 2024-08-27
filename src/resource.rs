@@ -9,7 +9,13 @@ use atomic_refcell::{AtomicRef, AtomicRefMut};
 use thiserror::Error;
 
 use crate::{
-    Component, ReadOnlySystemInput, SystemInput, TypeData, World, WorldAccess, WorldPtr,
+    Component,
+    ReadOnlySystemInput,
+    SystemInput,
+    TypeData,
+    World,
+    WorldAccess,
+    WorldPtr,
 };
 
 /// Trait for resources.

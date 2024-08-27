@@ -56,16 +56,6 @@ impl<'w> EntityPtr<'w> {
         self.entity
     }
 
-    /// The amount of components in this entity.
-    unsafe fn len(self) -> usize {
-        unsafe { self.table() }.header().len()
-    }
-
-    /// Returns `true` if this entity has no components.
-    unsafe fn is_empty(self) -> bool {
-        unsafe { self.len() == 0 }
-    }
-
     /// Convert this pointer to an [`EntityRef`].
     ///
     /// # Safety
@@ -96,11 +86,6 @@ impl<'w> EntityPtr<'w> {
         EntityWorld { inner: self }
     }
 
-    /// Returns `true` if this entity contains the component.
-    unsafe fn contains<C: Component>(self) -> bool {
-        unsafe { self.table() }.header().contains::<C>()
-    }
-
     /// # Safety
     ///
     /// This must not be used to alias access to components.
@@ -119,81 +104,6 @@ impl<'w> EntityPtr<'w> {
         unsafe { self.table_mut() }
             .get_mut(self.entity)
             .ok_or(ComponentNotFound::new::<C>(self.entity))
-    }
-
-    /// Insert a new component into this entity. Returns the previous value (if
-    /// present).
-    ///
-    /// # Safety
-    ///
-    /// - The world pointer must point to a valid world and be usable for
-    ///   structural writes.
-    /// - The entity must be alive.
-    unsafe fn insert<C: Component>(&mut self, component: C) -> Option<C> {
-        if unsafe { self.contains::<C>() } {
-            let table = unsafe { self.table_mut() };
-
-            table.replace(self.entity, component)
-        } else {
-            let old_table = unsafe { self.table_id() };
-            let new_table = unsafe {
-                let components = self.world.components_mut();
-
-                components
-                    .realloc_with(
-                        self.entity,
-                        old_table,
-                        TypeData::of::<C>(),
-                        true,
-                        |table| {
-                            table.write(self.entity, component);
-                        },
-                    )
-                    // SAFETY: the table is guaranteed to contain this entity
-                    .unwrap_unchecked()
-            };
-
-            unsafe { self.world.entities_mut().set(self.entity, new_table) };
-
-            None
-        }
-    }
-
-    /// Remove a component from this entity.
-    ///
-    /// # Safety
-    ///
-    /// - The world pointer must point to a valid world and be usable for
-    ///   structural writes.
-    /// - The entity must be alive.
-    unsafe fn remove<C: Component>(&mut self) -> Result<C, ComponentNotFound> {
-        let component = TypeData::of::<C>();
-
-        unsafe {
-            self.contains::<C>()
-                .then(|| {
-                    let old_table = self.table_id();
-                    let new_table = {
-                        let components = self.world.components_mut();
-
-                        components
-                            .realloc_without(self.entity, old_table, component, false)
-                            // SAFETY: the table is guaranteed to contain this entity
-                            .unwrap_unchecked()
-                    };
-
-                    self.world.entities_mut().set(self.entity, new_table);
-
-                    self.world
-                        .components_mut()
-                        .table_mut(old_table)
-                        .unwrap_unchecked()
-                        .get_ptr_unchecked_mut(self.entity, component)
-                        .cast::<C>()
-                        .read()
-                })
-                .ok_or(ComponentNotFound::new::<C>(self.entity))
-        }
     }
 
     unsafe fn table_id(self) -> TableId {
@@ -254,12 +164,12 @@ impl<'w> EntityRef<'w> {
 
     /// The amount of components in this entity.
     pub fn len(self) -> usize {
-        unsafe { self.inner.len() }
+        unsafe { self.inner.table() }.header().len()
     }
 
     /// Returns `true` if this entity has no components.
     pub fn is_empty(self) -> bool {
-        unsafe { self.inner.is_empty() }
+        unsafe { self.inner.table() }.header().len() == 0
     }
 
     /// Returns `true` if this entity contains the component.
@@ -424,7 +334,33 @@ impl<'w> EntityWorld<'w> {
     /// Insert a new component into this entity. Returns the previous value (if
     /// present).
     pub fn insert<C: Component>(&mut self, component: C) -> Option<C> {
-        unsafe { self.inner.insert(component) }
+        if unsafe { self.inner.table() }.header().contains::<C>() {
+            let table = unsafe { self.inner.table_mut() };
+
+            table.replace(self.inner.entity, component)
+        } else {
+            let old_table = unsafe { self.inner.table_id() };
+            let new_table = unsafe {
+                let components = self.inner.world.components_mut();
+
+                components
+                    .realloc_with(
+                        self.inner.entity,
+                        old_table,
+                        TypeData::of::<C>(),
+                        true,
+                        |table| {
+                            table.write(self.inner.entity, component);
+                        },
+                    )
+                    // SAFETY: the table is guaranteed to contain self.inner entity
+                    .unwrap_unchecked()
+            };
+
+            unsafe { self.inner.world.entities_mut().set(self.inner.entity, new_table) };
+
+            None
+        }
     }
 
     /// Call [`EntityWorld::insert`] and return `self`.
@@ -436,7 +372,34 @@ impl<'w> EntityWorld<'w> {
 
     /// Remove a component from this entity.
     pub fn remove<C: Component>(&mut self) -> Result<C, ComponentNotFound> {
-        unsafe { self.inner.remove() }
+        let component = TypeData::of::<C>();
+
+        unsafe { self.inner.table() }
+            .header()
+            .contains::<C>()
+            .then(|| unsafe {
+                let old_table = self.inner.table_id();
+                let new_table = {
+                    let components = self.inner.world.components_mut();
+
+                    components
+                        .realloc_without(self.inner.entity, old_table, component, false)
+                        // SAFETY: the table is guaranteed to contain self entity
+                        .unwrap_unchecked()
+                };
+
+                self.inner.world.entities_mut().set(self.inner.entity, new_table);
+
+                self.inner
+                    .world
+                    .components_mut()
+                    .table_mut(old_table)
+                    .unwrap_unchecked()
+                    .get_ptr_unchecked_mut(self.inner.entity, component)
+                    .cast::<C>()
+                    .read()
+            })
+            .ok_or(ComponentNotFound::new::<C>(self.inner.entity))
     }
 
     /// Call [`EntityWorld::remove`] and return `self`.
@@ -476,10 +439,8 @@ mod tests {
         let e0 = world.spawn((A,)).id();
         let e1 = world.spawn((A, B)).id();
 
-        unsafe {
-            assert_eq!(world.as_ptr().entity(e0).len(), 1);
-            assert_eq!(world.as_ptr().entity(e1).len(), 2);
-        }
+        assert_eq!(world.entity(e0).unwrap().len(), 1);
+        assert_eq!(world.entity(e1).unwrap().len(), 2);
     }
 
     #[test]
