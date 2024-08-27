@@ -3,6 +3,12 @@
 use crate::{ReadOnlySystemInput, World, WorldAccess, WorldPtr};
 
 /// Trait for valid inputs to [`System`](crate::System)s.
+///
+/// # Safety
+///
+/// The access of this system set by [`SystemInput::access`] must be the same
+/// every time and must always match how the world is accessed in
+/// [`SystemInput::get`].
 pub unsafe trait SystemInput {
     /// The output of this system, returned by [`SystemInput::get`].
     ///
@@ -12,15 +18,15 @@ pub unsafe trait SystemInput {
     /// Retained state for this input.
     type State: Send + Sync + 'static;
 
-    /// initialize the state of this input.
+    /// Initializes the state of this input.
     fn init(world: &World) -> Self::State;
 
-    /// Update the component access of this system.
+    /// Updates the component access of this system.
     ///
     /// This is used to check that systems do not violate aliasing rules.
     fn access(access: &mut WorldAccess);
 
-    /// Get this input.
+    /// Gets this input.
     ///
     /// # Safety
     ///
@@ -32,7 +38,7 @@ pub unsafe trait SystemInput {
         state: &'s mut Self::State,
     ) -> Self::Output<'w, 's>;
 
-    /// Return whether [`SystemInput::apply`] should be called.
+    /// Returns whether [`SystemInput::apply`] should be called.
     ///
     /// Defaults to `false`.
     fn should_apply(state: &Self::State) -> bool {

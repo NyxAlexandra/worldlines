@@ -85,6 +85,10 @@ where
     }
 
     /// Get the input of this system.
+    ///
+    /// # Safety
+    ///
+    /// See [`SystemInput::get`].
     unsafe fn get_input<'w, 's>(
         &self,
         world: WorldPtr<'w>,

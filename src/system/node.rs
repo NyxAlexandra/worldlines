@@ -1,8 +1,14 @@
 use std::fmt;
 
 use crate::{
-    AnySystem, ReadOnlySystem, ReadOnlySystemInput, System, SystemInput, World,
-    WorldAccess, WorldPtr,
+    AnySystem,
+    ReadOnlySystem,
+    ReadOnlySystemInput,
+    System,
+    SystemInput,
+    World,
+    WorldAccess,
+    WorldPtr,
 };
 
 /// A [`System`] in an [`App`](crate::App) and its run conditions.

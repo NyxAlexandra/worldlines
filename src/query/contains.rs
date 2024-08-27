@@ -1,7 +1,12 @@
 use std::marker::PhantomData;
 
 use crate::{
-    Component, EntityPtr, EntityRef, QueryData, QueryFilter, ReadOnlyQueryData,
+    Component,
+    EntityPtr,
+    EntityRef,
+    QueryData,
+    QueryFilter,
+    ReadOnlyQueryData,
     WorldAccess,
 };
 

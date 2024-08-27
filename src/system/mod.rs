@@ -93,6 +93,10 @@ pub unsafe trait System<I: SystemInput, O = ()> {
 }
 
 /// A [`System`] that can be ran from an immutable reference.
+///
+/// # Safety
+///
+/// [`System::access`] must match how the world is accessed.
 pub unsafe trait ReadOnlySystem<I, O = ()>
 where
     Self: System<I, O>,
