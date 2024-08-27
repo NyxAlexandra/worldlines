@@ -1,14 +1,8 @@
 use std::fmt;
 
 use crate::{
-    AnySystem,
-    ReadOnlySystem,
-    ReadOnlySystemInput,
-    System,
-    SystemInput,
-    World,
-    WorldAccess,
-    WorldPtr,
+    AnySystem, ReadOnlySystem, ReadOnlySystemInput, System, SystemInput, World,
+    WorldAccess, WorldPtr,
 };
 
 /// A [`System`] in an [`App`](crate::App) and its run conditions.
@@ -72,12 +66,11 @@ impl<O> SystemNode<O> {
     pub unsafe fn run_from(&mut self, world: WorldPtr<'_>) -> Option<O> {
         self.validate();
 
-        if self.is_valid != Some(true) {
-            return None;
-        } else if self
-            .conditions
-            .iter_mut()
-            .any(|condition| unsafe { !condition.run(world) })
+        if self.is_valid != Some(true)
+            || self
+                .conditions
+                .iter_mut()
+                .any(|condition| unsafe { !condition.run(world) })
         {
             return None;
         }
