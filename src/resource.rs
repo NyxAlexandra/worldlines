@@ -8,12 +8,14 @@ use std::ops::{Deref, DerefMut};
 use atomic_refcell::{AtomicRef, AtomicRefMut};
 use thiserror::Error;
 
-use crate::{ReadOnlySystemInput, SystemInput, TypeData, World, WorldAccess, WorldPtr};
+use crate::{
+    Component, ReadOnlySystemInput, SystemInput, TypeData, World, WorldAccess, WorldPtr,
+};
 
 /// Trait for resources.
-pub trait Resource: 'static {}
+pub trait Resource: Component {}
 
-impl<R: 'static> Resource for R {}
+impl<R: Component> Resource for R {}
 
 /// A reference to a [`Resource`].
 #[derive(Debug)]

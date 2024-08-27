@@ -5,31 +5,10 @@ use thiserror::Error;
 
 pub use self::ptr::*;
 use crate::{
-    array,
-    Bundle,
-    Components,
-    Entities,
-    EntitiesIter,
-    EntitiesIterMut,
-    Entity,
-    EntityMut,
-    EntityNotFound,
-    EntityRef,
-    EntitySlot,
-    EntityWorld,
-    Query,
-    QueryData,
-    QueryFilter,
-    ReadOnlyQueryData,
-    ReadOnlySystemInput,
-    Res,
-    ResMut,
-    Resource,
-    ResourceError,
-    Resources,
-    SystemInput,
-    WorldAccess,
-    WorldAccessError,
+    array, Bundle, Components, Entities, EntitiesIter, EntitiesIterMut, Entity,
+    EntityMut, EntityNotFound, EntityRef, EntitySlot, EntityWorld, Query, QueryData,
+    QueryFilter, ReadOnlyQueryData, ReadOnlySystemInput, Res, ResMut, Resource,
+    ResourceError, Resources, SystemInput, WorldAccess, WorldAccessError,
 };
 
 mod ptr;
@@ -299,6 +278,11 @@ pub enum EntityScopeError {
     #[error("entity {0:?} not found")]
     EntityNotFound(Entity),
 }
+
+// SAFETY: all resources and components are `Send + Sync`
+unsafe impl Send for World {}
+// SAFETY: all resources and components are `Send + Sync`
+unsafe impl Sync for World {}
 
 impl Default for World {
     fn default() -> Self {

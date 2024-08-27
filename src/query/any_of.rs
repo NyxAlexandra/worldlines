@@ -27,7 +27,7 @@ mod tests {
         let mut world = World::new();
 
         let e0 = world.spawn((A,)).id();
-        let e1 = world.spawn((B,)).id();
+        let _e1 = world.spawn((B,)).id();
         let e2 = world.spawn((A, B)).id();
 
         let mut query = world.query::<Entity, AnyOf<(Contains<A>,)>>().unwrap();
