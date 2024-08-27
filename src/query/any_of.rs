@@ -20,6 +20,24 @@ mod tests {
     use crate::{Contains, Entity, World};
 
     #[test]
+    fn any_of_just_one() {
+        struct A;
+        struct B;
+
+        let mut world = World::new();
+
+        let e0 = world.spawn((A,)).id();
+        let e1 = world.spawn((B,)).id();
+        let e2 = world.spawn((A, B)).id();
+
+        let mut query = world.query::<Entity, AnyOf<(Contains<A>,)>>().unwrap();
+
+        assert_eq!(query.next(), Some(e0));
+        assert_eq!(query.next(), Some(e2));
+        assert!(query.next().is_none());
+    }
+
+    #[test]
     fn any_of_query() {
         struct A;
         struct B;

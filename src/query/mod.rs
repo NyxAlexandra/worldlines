@@ -5,15 +5,8 @@ pub use self::contains::*;
 pub use self::not::*;
 pub use self::or::*;
 use crate::{
-    EntityIterIds,
-    EntityPtr,
-    EntityRef,
-    ReadOnlySystemInput,
-    SystemInput,
-    World,
-    WorldAccess,
-    WorldAccessError,
-    WorldPtr,
+    EntityIterIds, EntityPtr, EntityRef, ReadOnlySystemInput, SystemInput, World,
+    WorldAccess, WorldAccessError, WorldPtr,
 };
 
 mod any_of;
@@ -153,17 +146,9 @@ macro_rules! impl_query_data {
         impl_query_data!([] [$($t)*]);
     };
 
-    ([$t:ident] []) => {
-        impl<$t: QueryFilter> QueryFilter for ($t,) {
-            fn include(entity: EntityRef<'_>) -> bool {
-                $t::include(entity)
-            }
-        }
-    };
-
     ([$($t:ident)*] []) => {
-        unsafe impl<$($t: QueryData),*> QueryData for ($($t),*) {
-            type Output<'w> = ($($t::Output<'w>),*);
+        unsafe impl<$($t: QueryData),*> QueryData for ($($t,)*) {
+            type Output<'w> = ($($t::Output<'w>,)*);
 
             #[allow(unused_variables)]
             fn access(access: &mut WorldAccess) {
@@ -178,7 +163,7 @@ macro_rules! impl_query_data {
             }
         }
 
-        unsafe impl<$($t),*> ReadOnlyQueryData for ($($t),*)
+        unsafe impl<$($t),*> ReadOnlyQueryData for ($($t,)*)
         where
             $($t: ReadOnlyQueryData,)*
         {
@@ -198,10 +183,8 @@ macro_rules! impl_query_filter {
         impl_query_filter!([] [$($t)*]);
     };
 
-    ([$_:ident] []) => {};
-
     ([$($t:ident)*] []) => {
-        impl<$($t),*> QueryFilter for ($($t),*)
+        impl<$($t),*> QueryFilter for ($($t,)*)
         where
             $($t: QueryFilter,)*
         {
@@ -211,14 +194,14 @@ macro_rules! impl_query_filter {
             }
         }
 
-        impl<$($t),*> QueryFilterSet for ($($t),*)
+        impl<$($t),*> QueryFilterSet for ($($t,)*)
         where
             $($t: QueryFilter,)*
         {
             // compiler seems to be falsely emitting this warning
             #[allow(refining_impl_trait)]
             fn filters() -> impl Iterator<Item = fn(EntityRef<'_>) -> bool> {
-                [$($t::include),*].into_iter()
+                [$($t::include as fn(EntityRef<'_>) -> bool),*].into_iter()
             }
         }
     };
