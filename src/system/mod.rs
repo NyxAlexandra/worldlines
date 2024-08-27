@@ -184,7 +184,7 @@ macro_rules! impl_system {
             F: for<'w, 's> FnMut($($t::Output<'w, 's>,)*) -> O,
             $($t: SystemInput,)*
         {
-            #[allow(unused_variables, non_snake_case)]
+            #[allow(unused_variables, non_snake_case, clippy::needless_lifetimes)]
             unsafe fn run<'w, 's>(&mut self, input: ($($t::Output<'w, 's>,)*)) -> O {
                 let ($($t,)*) = input;
 
