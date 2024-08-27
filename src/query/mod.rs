@@ -5,8 +5,15 @@ pub use self::contains::*;
 pub use self::not::*;
 pub use self::or::*;
 use crate::{
-    EntityIterIds, EntityPtr, EntityRef, ReadOnlySystemInput, SystemInput, World,
-    WorldAccess, WorldAccessError, WorldPtr,
+    EntityIterIds,
+    EntityPtr,
+    EntityRef,
+    ReadOnlySystemInput,
+    SystemInput,
+    World,
+    WorldAccess,
+    WorldAccessError,
+    WorldPtr,
 };
 
 mod any_of;
