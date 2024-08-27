@@ -49,12 +49,12 @@ impl<'w> EntityPtr<'w> {
     }
 
     /// The amount of components in this entity.
-    pub unsafe fn len(self) -> usize {
+    unsafe fn len(self) -> usize {
         unsafe { self.table() }.header().len()
     }
 
     /// Returns `true` if this entity has no components.
-    pub unsafe fn is_empty(self) -> bool {
+    unsafe fn is_empty(self) -> bool {
         unsafe { self.len() == 0 }
     }
 
