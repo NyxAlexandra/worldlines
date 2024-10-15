@@ -6,16 +6,8 @@ use std::{fmt, ptr};
 use thiserror::Error;
 
 use crate::{
-    Component,
-    Entity,
-    QueryData,
-    ReadOnlyQueryData,
-    Table,
-    TableId,
-    TypeData,
-    World,
-    WorldAccess,
-    WorldPtr,
+    Component, Entity, QueryData, ReadOnlyQueryData, Table, TableId, TypeData, World,
+    WorldAccess, WorldPtr,
 };
 
 /// An immutable reference to an entity.
