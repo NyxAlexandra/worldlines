@@ -31,7 +31,8 @@ mod tests {
         let e4 = world.spawn((A, C)).id();
         let e5 = world.spawn((B, C)).id();
 
-        let mut query = world.query::<Entity, Or<Contains<A>, Contains<B>>>().unwrap();
+        let mut query =
+            world.query::<Entity, Or<Contains<A>, Contains<B>>>().unwrap();
 
         assert_eq!(query.next().unwrap(), e0);
         assert_eq!(query.next().unwrap(), e1);

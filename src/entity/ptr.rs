@@ -6,8 +6,16 @@ use std::{fmt, ptr};
 use thiserror::Error;
 
 use crate::{
-    Component, Entity, QueryData, ReadOnlyQueryData, Table, TableId, TypeData, World,
-    WorldAccess, WorldPtr,
+    Component,
+    Entity,
+    QueryData,
+    ReadOnlyQueryData,
+    Table,
+    TableId,
+    TypeData,
+    World,
+    WorldAccess,
+    WorldPtr,
 };
 
 /// An immutable reference to an entity.
@@ -105,13 +113,18 @@ impl<'w> EntityPtr<'w> {
 
     unsafe fn table(&self) -> &'w Table {
         // SAFETY: [`EntityPtr::table_id`] panics if the entity isn't alive
-        unsafe { self.world.components().table(self.table_id()).unwrap_unchecked() }
+        unsafe {
+            self.world.components().table(self.table_id()).unwrap_unchecked()
+        }
     }
 
     unsafe fn table_mut(&mut self) -> &'w mut Table {
         unsafe {
             // SAFETY: [`EntityPtr::table_id`] panics if the entity isn't alive
-            self.world.components_mut().table_mut(self.table_id()).unwrap_unchecked()
+            self.world
+                .components_mut()
+                .table_mut(self.table_id())
+                .unwrap_unchecked()
         }
     }
 }
@@ -137,7 +150,10 @@ impl fmt::Debug for ComponentNotFound {
 }
 
 impl<'w> EntityRef<'w> {
-    pub(crate) fn new(world: &'w World, entity: Entity) -> Result<Self, EntityNotFound> {
+    pub(crate) fn new(
+        world: &'w World,
+        entity: Entity,
+    ) -> Result<Self, EntityNotFound> {
         world
             .contains(entity)
             .then(|| Self { inner: world.as_ptr().entity(entity) })
@@ -242,7 +258,9 @@ impl<'w> EntityMut<'w> {
     }
 
     /// Mutably borrow a component of this entity.
-    pub fn get_mut<C: Component>(&mut self) -> Result<&'w mut C, ComponentNotFound> {
+    pub fn get_mut<C: Component>(
+        &mut self,
+    ) -> Result<&'w mut C, ComponentNotFound> {
         unsafe { self.inner.get_mut() }
     }
 }
@@ -319,7 +337,9 @@ impl<'w> EntityWorld<'w> {
     }
 
     /// Mutably borrow a component of this entity.
-    pub fn get_mut<C: Component>(&mut self) -> Result<&'w mut C, ComponentNotFound> {
+    pub fn get_mut<C: Component>(
+        &mut self,
+    ) -> Result<&'w mut C, ComponentNotFound> {
         self.as_mut().get_mut()
     }
 
@@ -345,11 +365,17 @@ impl<'w> EntityWorld<'w> {
                             table.write(self.inner.entity, component);
                         },
                     )
-                    // SAFETY: the table is guaranteed to contain self.inner entity
+                    // SAFETY: the table is guaranteed to contain self.inner
+                    // entity
                     .unwrap_unchecked()
             };
 
-            unsafe { self.inner.world.entities_mut().set(self.inner.entity, new_table) };
+            unsafe {
+                self.inner
+                    .world
+                    .entities_mut()
+                    .set(self.inner.entity, new_table)
+            };
 
             None
         }
@@ -375,12 +401,21 @@ impl<'w> EntityWorld<'w> {
                     let components = self.inner.world.components_mut();
 
                     components
-                        .realloc_without(self.inner.entity, old_table, component, false)
-                        // SAFETY: the table is guaranteed to contain self entity
+                        .realloc_without(
+                            self.inner.entity,
+                            old_table,
+                            component,
+                            false,
+                        )
+                        // SAFETY: the table is guaranteed to contain self
+                        // entity
                         .unwrap_unchecked()
                 };
 
-                self.inner.world.entities_mut().set(self.inner.entity, new_table);
+                self.inner
+                    .world
+                    .entities_mut()
+                    .set(self.inner.entity, new_table);
 
                 self.inner
                     .world

@@ -22,7 +22,10 @@ pub struct WorldQueue<'w, 's> {
 
 impl<'w, 's> WorldQueue<'w, 's> {
     /// Returns an [`EntityQueue`] for an entity.
-    pub fn entity(&mut self, entity: Entity) -> Result<EntityQueue<'_>, EntityNotFound> {
+    pub fn entity(
+        &mut self,
+        entity: Entity,
+    ) -> Result<EntityQueue<'_>, EntityNotFound> {
         self.entities
             .contains(entity)
             .then_some(EntityQueue { entity, queue: self.queue })

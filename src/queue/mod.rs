@@ -42,7 +42,10 @@ impl CommandQueue {
     }
 
     /// Borrow this command queue as a [`WorldQueue`].
-    pub fn as_world_queue<'w, 's>(&'s mut self, world: &'w World) -> WorldQueue<'w, 's> {
+    pub fn as_world_queue<'w, 's>(
+        &'s mut self,
+        world: &'w World,
+    ) -> WorldQueue<'w, 's> {
         WorldQueue { entities: &world.entities, queue: self }
     }
 

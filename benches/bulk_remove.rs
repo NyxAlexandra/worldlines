@@ -12,8 +12,9 @@ fn benchmark(c: &mut Criterion) {
     c.bench_function("bulk_remove", |bencher| {
         bencher.iter(|| {
             let mut world = World::new();
-            let entities: Vec<_> =
-                world.spawn_iter((0..10000).map(|_| (A(123), B(321)))).collect();
+            let entities: Vec<_> = world
+                .spawn_iter((0..10000).map(|_| (A(123), B(321))))
+                .collect();
 
             for entity in entities {
                 _ = world.entity_world(entity).unwrap().remove::<B>();

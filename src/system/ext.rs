@@ -28,7 +28,11 @@ where
     ///
     /// - The system access must be valid.
     /// - [`System::init`] must have already been called.
-    unsafe fn run_from(&mut self, world: WorldPtr<'_>, state: &mut I::State) -> O {
+    unsafe fn run_from(
+        &mut self,
+        world: WorldPtr<'_>,
+        state: &mut I::State,
+    ) -> O {
         unsafe {
             let input = I::get(world, state);
 
@@ -42,7 +46,11 @@ where
     ///
     /// - The system access must be valid.
     /// - [`System::init`] must have already been called.
-    unsafe fn run_from_mut(&mut self, world: &mut World, state: &mut I::State) -> O {
+    unsafe fn run_from_mut(
+        &mut self,
+        world: &mut World,
+        state: &mut I::State,
+    ) -> O {
         unsafe {
             let input = I::get(world.as_ptr_mut(), state);
 

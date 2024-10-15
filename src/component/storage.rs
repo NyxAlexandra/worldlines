@@ -36,20 +36,22 @@ impl Components {
 
     /// Reserve space for an amount of new entities containing bundle `B`.
     pub fn reserve<B: Bundle>(&mut self, additional: usize) -> TableId {
-        let id = self.bundles.get(&TypeId::of::<B>()).copied().unwrap_or_else(|| {
-            let header = B::types();
+        let id = self.bundles.get(&TypeId::of::<B>()).copied().unwrap_or_else(
+            || {
+                let header = B::types();
 
-            self.type_sets.get(&header).copied().unwrap_or_else(|| {
-                let table = Table::new(header.clone());
-                let id = TableId(self.tables.len());
+                self.type_sets.get(&header).copied().unwrap_or_else(|| {
+                    let table = Table::new(header.clone());
+                    let id = TableId(self.tables.len());
 
-                self.bundles.insert(TypeId::of::<B>(), id);
-                self.type_sets.insert(header, id);
-                self.tables.push(table);
+                    self.bundles.insert(TypeId::of::<B>(), id);
+                    self.type_sets.insert(header, id);
+                    self.tables.push(table);
 
-                id
-            })
-        });
+                    id
+                })
+            },
+        );
         let table = unsafe { self.table_mut(id).unwrap_unchecked() };
 
         table.reserve(additional);
@@ -60,7 +62,11 @@ impl Components {
     /// # Safety
     ///
     /// The entity must not have already been allocated.
-    pub unsafe fn alloc<B: Bundle>(&mut self, entity: Entity, bundle: B) -> TableId {
+    pub unsafe fn alloc<B: Bundle>(
+        &mut self,
+        entity: Entity,
+        bundle: B,
+    ) -> TableId {
         let id = self.reserve::<B>(1);
         let table = unsafe { self.table_mut(id).unwrap_unchecked() };
 
@@ -103,14 +109,15 @@ impl Components {
             }
         }
 
-        let new_table = self.type_sets.get(&new_header).copied().unwrap_or_else(|| {
-            let new_table = TableId(self.tables.len());
+        let new_table =
+            self.type_sets.get(&new_header).copied().unwrap_or_else(|| {
+                let new_table = TableId(self.tables.len());
 
-            self.type_sets.insert(new_header.clone(), new_table);
-            self.tables.push(Table::new(new_header.clone()));
+                self.type_sets.insert(new_header.clone(), new_table);
+                self.tables.push(Table::new(new_header.clone()));
 
-            new_table
-        });
+                new_table
+            });
 
         if old_table == new_table {
             return None;
@@ -129,7 +136,8 @@ impl Components {
             // move existing components
             for component in &intersection {
                 unsafe {
-                    let ptr = old_table.get_ptr_unchecked_mut(entity, component);
+                    let ptr =
+                        old_table.get_ptr_unchecked_mut(entity, component);
 
                     new_table.insert(entity);
                     new_table.write_ptr(entity, component, ptr);
@@ -143,7 +151,8 @@ impl Components {
 
                 for component in &difference {
                     unsafe {
-                        let ptr = old_table.get_ptr_unchecked_mut(entity, component);
+                        let ptr =
+                            old_table.get_ptr_unchecked_mut(entity, component);
 
                         component.drop()(ptr);
                     }
@@ -195,10 +204,21 @@ impl Components {
         component: TypeData,
         drop: bool,
     ) -> Option<TableId> {
-        let new_header =
-            self.table(old_table)?.header().clone().without_type_data(component);
+        let new_header = self
+            .table(old_table)?
+            .header()
+            .clone()
+            .without_type_data(component);
 
-        unsafe { self.realloc(entity, old_table, new_header, drop, |_| unreachable!()) }
+        unsafe {
+            self.realloc(
+                entity,
+                old_table,
+                new_header,
+                drop,
+                |_| unreachable!(),
+            )
+        }
     }
 
     /// Drop the components of an entity.
@@ -236,9 +256,15 @@ mod tests {
         let old_table = unsafe { components.alloc(entity, (Name("entity"),)) };
         let new_table = unsafe {
             components
-                .realloc_with(entity, old_table, TypeData::of::<Age>(), true, |table| {
-                    table.write(entity, Age(123));
-                })
+                .realloc_with(
+                    entity,
+                    old_table,
+                    TypeData::of::<Age>(),
+                    true,
+                    |table| {
+                        table.write(entity, Age(123));
+                    },
+                )
                 .unwrap()
         };
 
@@ -267,7 +293,8 @@ mod tests {
 
         let entity = entities.alloc();
 
-        let old_table = unsafe { components.alloc(entity, (Person, Name("entity"))) };
+        let old_table =
+            unsafe { components.alloc(entity, (Person, Name("entity"))) };
         // lost their humanity
         let new_table = components
             .realloc_without(entity, old_table, TypeData::of::<Person>(), true)
@@ -307,7 +334,12 @@ mod tests {
         unsafe {
             let old_table = components.alloc(entity, (A,));
 
-            components.realloc_without(entity, old_table, TypeData::of::<A>(), true);
+            components.realloc_without(
+                entity,
+                old_table,
+                TypeData::of::<A>(),
+                true,
+            );
         }
 
         assert!(HAS_DROPPED.load(Ordering::Relaxed));
@@ -333,7 +365,12 @@ mod tests {
         unsafe {
             let old_table = components.alloc(entity, (A,));
 
-            components.realloc_without(entity, old_table, TypeData::of::<A>(), false);
+            components.realloc_without(
+                entity,
+                old_table,
+                TypeData::of::<A>(),
+                false,
+            );
         }
 
         assert!(!HAS_DROPPED.load(Ordering::Relaxed));

@@ -2,7 +2,15 @@ use std::mem;
 use std::ptr::{self};
 
 use super::Column;
-use crate::{ComponentId, Entity, SparseIndex, SparseMap, SparseSet, TypeData, TypeSet};
+use crate::{
+    ComponentId,
+    Entity,
+    SparseIndex,
+    SparseMap,
+    SparseSet,
+    TypeData,
+    TypeSet,
+};
 
 #[derive(Debug)]
 pub struct Table {
@@ -14,7 +22,8 @@ pub struct Table {
 impl Table {
     pub fn new(header: TypeSet) -> Self {
         let entities = SparseSet::new();
-        let columns = header.slots().map(|slot| slot.map(Column::new)).collect();
+        let columns =
+            header.slots().map(|slot| slot.map(Column::new)).collect();
 
         Self { header, entities, columns }
     }
@@ -48,9 +57,13 @@ impl Table {
             .then(|| {
                 self.columns
                     .get(&ComponentId::of::<C>())
-                    // SAFETY: the component is live as this table contains the entity
-                    .map(|column| unsafe { column.get_unchecked(entity.sparse_index()) })
-                    // SAFETY: the pointer is guaranteed to be non-null and a valid `C`
+                    // SAFETY: the component is live as this table contains the
+                    // entity
+                    .map(|column| unsafe {
+                        column.get_unchecked(entity.sparse_index())
+                    })
+                    // SAFETY: the pointer is guaranteed to be non-null and a
+                    // valid `C`
                     .and_then(|ptr| unsafe { ptr.cast::<C>().as_ref() })
             })
             .flatten()
@@ -61,11 +74,13 @@ impl Table {
             .then(|| {
                 self.columns
                     .get_mut(&ComponentId::of::<C>())
-                    // SAFETY: the component is live as this table contains the entity
+                    // SAFETY: the component is live as this table contains the
+                    // entity
                     .map(|column| unsafe {
                         column.get_unchecked_mut(entity.sparse_index())
                     })
-                    // SAFETY: the pointer is guaranteed to be non-null and a valid `C`
+                    // SAFETY: the pointer is guaranteed to be non-null and a
+                    // valid `C`
                     .and_then(|ptr| unsafe { ptr.cast::<C>().as_mut() })
             })
             .flatten()
@@ -84,11 +99,17 @@ impl Table {
         }
     }
 
-    pub fn replace<C: 'static>(&mut self, entity: Entity, component: C) -> Option<C> {
+    pub fn replace<C: 'static>(
+        &mut self,
+        entity: Entity,
+        component: C,
+    ) -> Option<C> {
         self.entities.remove(&entity)?;
 
         let prev = unsafe {
-            self.get_ptr_unchecked_mut(entity, TypeData::of::<C>()).cast::<C>().read()
+            self.get_ptr_unchecked_mut(entity, TypeData::of::<C>())
+                .cast::<C>()
+                .read()
         };
 
         self.write(entity, component);
@@ -110,7 +131,11 @@ impl Table {
     /// inserted if the entity contained the component.
     ///
     /// Returns `None` if the table doesn't contain the component.
-    pub fn write<T: 'static>(&mut self, entity: Entity, mut component: T) -> Option<()> {
+    pub fn write<T: 'static>(
+        &mut self,
+        entity: Entity,
+        mut component: T,
+    ) -> Option<()> {
         unsafe {
             self.write_ptr(
                 entity,

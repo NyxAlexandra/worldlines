@@ -2,7 +2,14 @@ use std::fmt;
 
 pub(crate) use self::allocator::*;
 pub use self::ptr::*;
-use crate::{QueryData, ReadOnlyQueryData, SparseIndex, World, WorldAccess, WorldPtr};
+use crate::{
+    QueryData,
+    ReadOnlyQueryData,
+    SparseIndex,
+    World,
+    WorldAccess,
+    WorldPtr,
+};
 
 mod allocator;
 mod ptr;
@@ -56,9 +63,9 @@ impl<'w> Iterator for EntitiesIter<'w> {
     type Item = EntityRef<'w>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.ids
-            .next()
-            .map(|entity| unsafe { self.world.entity(entity).unwrap_unchecked() })
+        self.ids.next().map(|entity| unsafe {
+            self.world.entity(entity).unwrap_unchecked()
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

@@ -108,7 +108,11 @@ where
     ///
     /// - The system access must be valid.
     /// - [`System::init`] must have already been called.
-    unsafe fn run_from_ref(&mut self, world: &World, state: &mut I::State) -> O {
+    unsafe fn run_from_ref(
+        &mut self,
+        world: &World,
+        state: &mut I::State,
+    ) -> O {
         let input = unsafe { I::get(world.as_ptr(), state) };
 
         unsafe { self.run(input) }
@@ -265,7 +269,9 @@ macro_rules! impl_system {
     };
 }
 
-impl_system!(I0, I1, I2, I3, I4, I5, I6, I7, I8, I9, I10, I11, I12, I13, I14, I15);
+impl_system!(
+    I0, I1, I2, I3, I4, I5, I6, I7, I8, I9, I10, I11, I12, I13, I14, I15
+);
 
 #[cfg(test)]
 mod tests {

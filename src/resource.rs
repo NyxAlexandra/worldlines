@@ -126,7 +126,10 @@ impl<'w, R: ?Sized> ResMut<'w, R> {
     /// Map this reference `R -> U`.
     ///
     /// This is usually used to borrow a field of `R`.
-    pub fn map<U: ?Sized>(this: Self, f: impl FnOnce(&mut R) -> &mut U) -> ResMut<'w, U> {
+    pub fn map<U: ?Sized>(
+        this: Self,
+        f: impl FnOnce(&mut R) -> &mut U,
+    ) -> ResMut<'w, U> {
         ResMut { guard: AtomicRefMut::map(this.guard, f) }
     }
 }

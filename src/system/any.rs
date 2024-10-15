@@ -11,7 +11,9 @@ pub struct AnySystem<O = ()> {
 
 impl<O> AnySystem<O> {
     /// Creates an [`AnySystem`] from a [`System`].
-    pub fn new<I: SystemInput + 'static>(system: impl System<I, O> + 'static) -> Self {
+    pub fn new<I: SystemInput + 'static>(
+        system: impl System<I, O> + 'static,
+    ) -> Self {
         struct Inner<S, I: SystemInput> {
             system: S,
             state: Option<I::State>,

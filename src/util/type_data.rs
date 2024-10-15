@@ -8,9 +8,9 @@ use crate::{ComponentId, SparseIndex};
 /// Describes how to handle a particular type.
 #[derive(Clone, Copy)]
 pub struct TypeData {
-    // keep [`ComponentId`] here to avoid interactions with the id registry. Because the
-    // [`ComponentId`] is used as the source of the sparse index for [`TypeData`], it is
-    // accessed very often.
+    // keep [`ComponentId`] here to avoid interactions with the id registry.
+    // Because the [`ComponentId`] is used as the source of the sparse
+    // index for [`TypeData`], it is accessed very often.
     component_id: ComponentId,
     // trick to majorly decrease the size of this type.
     inner: fn() -> Inner,

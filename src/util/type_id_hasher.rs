@@ -8,7 +8,8 @@ use indexmap::IndexMap;
 pub type TypeMap<V> = HashMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
 
 /// An [`IndexMap`] mapping [`TypeId`]'s to values.
-pub type IndexTypeMap<V> = IndexMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
+pub type IndexTypeMap<V> =
+    IndexMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
 
 /// A hasher that specializes in hashing [`TypeId`]s.
 #[derive(Default)]

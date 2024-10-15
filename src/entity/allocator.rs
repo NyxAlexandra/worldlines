@@ -59,7 +59,10 @@ impl Entities {
     }
 
     /// Returns slot(s) for an index.
-    pub fn slot<I: SliceIndex<[EntitySlot]>>(&self, index: I) -> Option<&I::Output> {
+    pub fn slot<I: SliceIndex<[EntitySlot]>>(
+        &self,
+        index: I,
+    ) -> Option<&I::Output> {
         self.slots.get(index)
     }
 
@@ -87,7 +90,9 @@ impl Entities {
 
     /// Get the table of a entity.
     pub fn get(&self, entity: Entity) -> Option<TableId> {
-        self.slots.get(entity.index as usize).and_then(|EntitySlot { table, .. }| *table)
+        self.slots
+            .get(entity.index as usize)
+            .and_then(|EntitySlot { table, .. }| *table)
     }
 
     /// Iterate over the entities in storage.
@@ -99,8 +104,9 @@ impl Entities {
         debug_assert_eq!(
             self.reserved.load(Ordering::Relaxed),
             0,
-            "`Entities::iter` should only be called when all contained entities are \
-             allocated. The invariant that all entities are allocated should be held"
+            "`Entities::iter` should only be called when all contained \
+             entities are allocated. The invariant that all entities are \
+             allocated should be held"
         );
 
         EntityIterIds { inner: self.slots.iter().enumerate() }
@@ -122,8 +128,10 @@ impl Entities {
             self.slots.push(EntitySlot::new());
 
             Entity {
-                index: u32::try_from(self.slots.len() + *self.reserved.get_mut() - 1)
-                    .expect("entity overflow"),
+                index: u32::try_from(
+                    self.slots.len() + *self.reserved.get_mut() - 1,
+                )
+                .expect("entity overflow"),
                 version: 0,
             }
         }
@@ -139,8 +147,10 @@ impl Entities {
         self.slots.push(EntitySlot::new());
 
         Entity {
-            index: u32::try_from(self.slots.len() + *self.reserved.get_mut() - 1)
-                .expect("entity overflow"),
+            index: u32::try_from(
+                self.slots.len() + *self.reserved.get_mut() - 1,
+            )
+            .expect("entity overflow"),
             version: 0,
         }
     }
@@ -201,8 +211,8 @@ impl Entities {
         slot.alive = false;
         self.pending.push(entity.index);
         *self.cursor.get_mut() = self.pending.len() as _;
-        // decrement `allocated` as all entities are guaranteed to be allocated after
-        // [`Entities::flush`] was called above.
+        // decrement `allocated` as all entities are guaranteed to be allocated
+        // after [`Entities::flush`] was called above.
         self.allocated -= 1;
 
         table
@@ -359,7 +369,8 @@ mod tests {
     fn clear() {
         let mut entities = Entities::new();
 
-        let [e0, e1, e2] = [entities.alloc(), entities.alloc(), entities.alloc()];
+        let [e0, e1, e2] =
+            [entities.alloc(), entities.alloc(), entities.alloc()];
 
         assert_eq!(entities.len(), 3);
 
@@ -382,8 +393,12 @@ mod tests {
 
         assert!(entities.iter().next().is_none());
 
-        let [e0, e1, e2, e3] =
-            [entities.alloc(), entities.alloc(), entities.alloc(), entities.alloc()];
+        let [e0, e1, e2, e3] = [
+            entities.alloc(),
+            entities.alloc(),
+            entities.alloc(),
+            entities.alloc(),
+        ];
 
         {
             let mut iter = entities.iter();

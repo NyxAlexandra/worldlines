@@ -83,7 +83,9 @@ where
     /// ## Safety
     ///
     /// The pointer must be valid for the access of the query.
-    pub(crate) unsafe fn new(world: WorldPtr<'w>) -> Result<Self, WorldAccessError> {
+    pub(crate) unsafe fn new(
+        world: WorldPtr<'w>,
+    ) -> Result<Self, WorldAccessError> {
         let mut access = WorldAccess::new();
 
         D::access(&mut access);
@@ -118,8 +120,8 @@ where
         world: WorldPtr<'w>,
         _state: &'s mut Self::State,
     ) -> Self::Output<'w, 's> {
-        // SAFETY: caller must ensure that the access did not alias and the pointer is
-        // valid for the query's access
+        // SAFETY: caller must ensure that the access did not alias and the
+        // pointer is valid for the query's access
         unsafe { Query::new(world).unwrap_unchecked() }
     }
 }
@@ -309,7 +311,9 @@ mod tests {
         assert!(world.query::<EntityRef<'_>, ()>().is_ok());
         assert!(world.query_mut::<EntityMut<'_>, ()>().is_ok());
         assert!(world.query::<(EntityRef<'_>, EntityRef<'_>), ()>().is_ok());
-        assert!(world.query_mut::<(EntityMut<'_>, EntityMut<'_>), ()>().is_err());
+        assert!(world
+            .query_mut::<(EntityMut<'_>, EntityMut<'_>), ()>()
+            .is_err());
     }
 
     #[test]

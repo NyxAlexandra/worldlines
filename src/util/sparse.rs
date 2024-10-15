@@ -66,7 +66,8 @@ impl<I: SparseIndex> SparseSet<I> {
         }
 
         // SAFETY: guaranteed to exist due to above resize
-        let result = unsafe { self.inner.get_unchecked_mut(sparse) }.replace(index);
+        let result =
+            unsafe { self.inner.get_unchecked_mut(sparse) }.replace(index);
 
         if result.is_none() {
             self.count += 1;
@@ -176,14 +177,20 @@ impl<I: SparseIndex, T> SparseMap<I, T> {
         self.inner.get_mut(index.sparse_index()).and_then(Option::as_mut)
     }
 
-    pub fn get_or_insert_with(&mut self, index: I, f: impl FnOnce() -> T) -> &mut T {
+    pub fn get_or_insert_with(
+        &mut self,
+        index: I,
+        f: impl FnOnce() -> T,
+    ) -> &mut T {
         let sparse = index.sparse_index();
 
         if !self.contains(&index) {
             self.insert(index, f());
         }
 
-        unsafe { self.inner.get_unchecked_mut(sparse).as_mut().unwrap_unchecked() }
+        unsafe {
+            self.inner.get_unchecked_mut(sparse).as_mut().unwrap_unchecked()
+        }
     }
 
     pub fn get_or_default(&mut self, index: I) -> &mut T
@@ -200,7 +207,8 @@ impl<I: SparseIndex, T> SparseMap<I, T> {
             self.inner.resize_with(sparse + 1, || None);
         }
 
-        let result = unsafe { self.inner.get_unchecked_mut(sparse) }.replace(value);
+        let result =
+            unsafe { self.inner.get_unchecked_mut(sparse) }.replace(value);
 
         if result.is_none() {
             self.count += 1;

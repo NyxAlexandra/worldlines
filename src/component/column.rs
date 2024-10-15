@@ -12,7 +12,8 @@ pub struct Column {
 
 impl Column {
     pub fn new(component: TypeData) -> Self {
-        let capacity = if component.layout().size() == 0 { usize::MAX } else { 0 };
+        let capacity =
+            if component.layout().size() == 0 { usize::MAX } else { 0 };
         let ptr = NonNull::dangling();
 
         Self { component, capacity, ptr }
@@ -36,7 +37,9 @@ impl Column {
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> *mut u8 {
         debug_assert!(index < self.capacity);
 
-        unsafe { self.ptr.as_ptr().byte_add(self.component.layout().size() * index) }
+        unsafe {
+            self.ptr.as_ptr().byte_add(self.component.layout().size() * index)
+        }
     }
 
     /// Write a pointer to an index.
@@ -113,7 +116,8 @@ fn array(layout: Layout, n: usize) -> Layout {
 
 fn padding_needed_for(layout: Layout, align: usize) -> usize {
     let len = layout.size();
-    let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
+    let len_rounded_up =
+        len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
 
     len_rounded_up.wrapping_sub(len)
 }

@@ -96,7 +96,10 @@ impl World {
     }
 
     /// Borrow an entity.
-    pub fn entity(&self, entity: Entity) -> Result<EntityRef<'_>, EntityNotFound> {
+    pub fn entity(
+        &self,
+        entity: Entity,
+    ) -> Result<EntityRef<'_>, EntityNotFound> {
         EntityRef::new(self, entity)
     }
 
@@ -137,7 +140,9 @@ impl World {
         f(array::try_map(entities, |entity| unsafe {
             EntityMut::new(ptr.as_mut(), entity)
         })
-        .map_err(|EntityNotFound(entity)| EntityScopeError::EntityNotFound(entity))?);
+        .map_err(|EntityNotFound(entity)| {
+            EntityScopeError::EntityNotFound(entity)
+        })?);
 
         Ok(())
     }
@@ -163,7 +168,9 @@ impl World {
     }
 
     /// Return a [`Query`] of the entities of this world.
-    pub fn query_mut<D, F>(&mut self) -> Result<Query<'_, D, F>, WorldAccessError>
+    pub fn query_mut<D, F>(
+        &mut self,
+    ) -> Result<Query<'_, D, F>, WorldAccessError>
     where
         D: QueryData,
         F: QueryFilter,
@@ -216,7 +223,11 @@ impl World {
             let entity = unsafe {
                 Entity {
                     index: index as _,
-                    version: self.entities.slot(index).unwrap_unchecked().version,
+                    version: self
+                        .entities
+                        .slot(index)
+                        .unwrap_unchecked()
+                        .version,
                 }
             };
 
@@ -268,7 +279,9 @@ impl World {
     }
 
     /// Mutably borrow a resource.
-    pub fn resource_mut<R: Resource>(&self) -> Result<ResMut<'_, R>, ResourceError> {
+    pub fn resource_mut<R: Resource>(
+        &self,
+    ) -> Result<ResMut<'_, R>, ResourceError> {
         self.resources.get_mut()
     }
 
@@ -353,9 +366,10 @@ impl Iterator for SpawnIter<'_> {
     type Item = Entity;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next()
-            .map(|(index, slot)| Entity { index: index as _, version: slot.version })
+        self.inner.next().map(|(index, slot)| Entity {
+            index: index as _,
+            version: slot.version,
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

@@ -103,9 +103,9 @@ impl WorldAccess {
 
     fn access(&self, access: Access) -> Option<LeveledAccess> {
         match access {
-            Access::World => {
-                self.world.map(|level| LeveledAccess { access: Access::World, level })
-            },
+            Access::World => self
+                .world
+                .map(|level| LeveledAccess { access: Access::World, level }),
             Access::Entities => self
                 .entities
                 .map(|level| LeveledAccess { access: Access::Entities, level }),
@@ -207,12 +207,18 @@ impl WorldAccess {
         // TODO: replace with a `highest_component` field
         .chain(self.components.iter().copied().map(
             |ComponentAccess { component, level }| {
-                Some(LeveledAccess { access: Access::Component(component), level })
+                Some(LeveledAccess {
+                    access: Access::Component(component),
+                    level,
+                })
             },
         ))
         .chain(self.resources.iter().copied().map(
             |ResourceAccess { resource, level }| {
-                Some(LeveledAccess { access: Access::Resource(resource), level })
+                Some(LeveledAccess {
+                    access: Access::Resource(resource),
+                    level,
+                })
             },
         ))
         .flatten()
@@ -234,8 +240,10 @@ impl WorldAccess {
                 );
             },
             Access::Resource(resource) => {
-                self.resources
-                    .insert(resource.component_id(), ResourceAccess { resource, level });
+                self.resources.insert(
+                    resource.component_id(),
+                    ResourceAccess { resource, level },
+                );
             },
         }
     }
@@ -249,15 +257,21 @@ impl Default for WorldAccess {
 
 impl fmt::Debug for ComponentAccess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LeveledAccess { access: Access::Component(self.component), level: self.level }
-            .fmt(f)
+        LeveledAccess {
+            access: Access::Component(self.component),
+            level: self.level,
+        }
+        .fmt(f)
     }
 }
 
 impl fmt::Debug for ResourceAccess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LeveledAccess { access: Access::Resource(self.resource), level: self.level }
-            .fmt(f)
+        LeveledAccess {
+            access: Access::Resource(self.resource),
+            level: self.level,
+        }
+        .fmt(f)
     }
 }
 
@@ -267,11 +281,14 @@ impl LeveledAccess {
             && match (self.access, other.access) {
                 // conflict if multiple access to same component/resource
                 (Access::Component(first), Access::Component(second))
-                | (Access::Resource(first), Access::Resource(second)) => first == second,
+                | (Access::Resource(first), Access::Resource(second)) => {
+                    first == second
+                },
                 // accesses to components and resources don't conflict
                 (Access::Component(_), Access::Resource(_))
                 | (Access::Resource(_), Access::Component(_)) => false,
-                // multiple-mutable access is only valid among components/resources
+                // multiple-mutable access is only valid among
+                // components/resources
                 _ => true,
             }
     }
@@ -385,11 +402,14 @@ mod tests {
                 }),
             "access to all entities conflicts with access to components",
         );
-        assert!(!LeveledAccess { access: Access::Entities, level: Level::Read }
-            .conflicts_with(LeveledAccess {
-                access: Access::Component(TypeData::of::<A>()),
-                level: Level::Read,
-            }),);
+        assert!(!LeveledAccess {
+            access: Access::Entities,
+            level: Level::Read
+        }
+        .conflicts_with(LeveledAccess {
+            access: Access::Component(TypeData::of::<A>()),
+            level: Level::Read,
+        }),);
     }
 
     #[test]
@@ -397,30 +417,27 @@ mod tests {
         struct A;
 
         assert!(
-            LeveledAccess { access: Access::World, level: Level::Write }.conflicts_with(
-                LeveledAccess {
+            LeveledAccess { access: Access::World, level: Level::Write }
+                .conflicts_with(LeveledAccess {
                     access: Access::Resource(TypeData::of::<A>()),
                     level: Level::Read,
-                }
-            ),
+                }),
             "access to the world conflicts with access to resources",
         );
         assert!(
-            LeveledAccess { access: Access::World, level: Level::Read }.conflicts_with(
-                LeveledAccess {
+            LeveledAccess { access: Access::World, level: Level::Read }
+                .conflicts_with(LeveledAccess {
                     access: Access::Resource(TypeData::of::<A>()),
                     level: Level::Write,
-                }
-            ),
+                }),
             "access to the world conflicts with access to resources",
         );
         assert!(
-            LeveledAccess { access: Access::World, level: Level::Write }.conflicts_with(
-                LeveledAccess {
+            LeveledAccess { access: Access::World, level: Level::Write }
+                .conflicts_with(LeveledAccess {
                     access: Access::Resource(TypeData::of::<A>()),
                     level: Level::Write,
-                }
-            ),
+                }),
             "access to the world conflicts with access to resources",
         );
         assert!(!LeveledAccess { access: Access::World, level: Level::Read }

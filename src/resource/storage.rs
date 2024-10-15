@@ -85,7 +85,9 @@ impl ResourceBox {
     /// ## Safety
     ///
     /// The type `R` must match the type in the box.
-    unsafe fn get_mut<R: Resource>(&self) -> Result<ResMut<'_, R>, ResourceError> {
+    unsafe fn get_mut<R: Resource>(
+        &self,
+    ) -> Result<ResMut<'_, R>, ResourceError> {
         self.inner
             .try_borrow_mut()
             .map(|any| {

@@ -32,7 +32,8 @@ pub unsafe fn get_many_unchecked_mut<T, const N: usize>(
         for i in 0..N {
             let index = *indices.get_unchecked(i);
 
-            *get_unchecked_mut(arr_ptr, i) = &mut *get_unchecked_mut(slice, index);
+            *get_unchecked_mut(arr_ptr, i) =
+                &mut *get_unchecked_mut(slice, index);
         }
         arr.assume_init()
     }
@@ -50,7 +51,10 @@ mod tests {
 
     #[test]
     fn array_try_map() {
-        assert_eq!(try_map(["1", "2", "3"], |v| v.parse::<u32>()).unwrap(), [1, 2, 3]);
+        assert_eq!(
+            try_map(["1", "2", "3"], |v| v.parse::<u32>()).unwrap(),
+            [1, 2, 3]
+        );
         assert!(try_map(["1", "2a", "3"], |v| v.parse::<u32>()).is_err());
     }
 

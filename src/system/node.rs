@@ -28,7 +28,9 @@ pub trait IntoSystemNodes<I: SystemInput, O = ()> {
 
 impl<O> SystemNode<O> {
     /// Creates a new system node.
-    pub fn new<I: SystemInput + 'static>(system: impl System<I, O> + 'static) -> Self {
+    pub fn new<I: SystemInput + 'static>(
+        system: impl System<I, O> + 'static,
+    ) -> Self {
         let inner = AnySystem::new(system);
         let is_valid = None;
         let conditions = Vec::new();

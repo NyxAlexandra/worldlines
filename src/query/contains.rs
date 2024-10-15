@@ -34,8 +34,8 @@ unsafe impl<C: Component> QueryData for Contains<C> {
     fn access(_access: &mut WorldAccess) {}
 
     unsafe fn fetch(entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
-        // SAFETY: the pointer provided to [`QueryData::fetch`] must always be valid to
-        // read metadata
+        // SAFETY: the pointer provided to [`QueryData::fetch`] must always be
+        // valid to read metadata
         Some(unsafe { entity.as_ref().contains::<C>() })
     }
 }
@@ -63,7 +63,8 @@ mod tests {
         let healthy = world.spawn((Hp(3),)).id();
         let poisoned = world.spawn((Hp(3), Poisoned)).id();
 
-        for Hp(hp) in world.query_mut::<&mut Hp, Contains<Poisoned>>().unwrap() {
+        for Hp(hp) in world.query_mut::<&mut Hp, Contains<Poisoned>>().unwrap()
+        {
             *hp -= 1;
         }
 

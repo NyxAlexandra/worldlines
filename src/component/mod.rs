@@ -9,7 +9,13 @@ use dashmap::DashMap;
 pub(self) use self::column::*;
 pub(crate) use self::storage::*;
 pub(crate) use self::table::*;
-use crate::{EntityPtr, QueryData, ReadOnlyQueryData, SparseIndex, WorldAccess};
+use crate::{
+    EntityPtr,
+    QueryData,
+    ReadOnlyQueryData,
+    SparseIndex,
+    WorldAccess,
+};
 
 mod column;
 mod storage;
@@ -27,7 +33,8 @@ pub(crate) struct ComponentId(usize);
 
 impl ComponentId {
     pub fn of<T: 'static>() -> Self {
-        static REGISTRY: OnceLock<DashMap<TypeId, ComponentId>> = OnceLock::new();
+        static REGISTRY: OnceLock<DashMap<TypeId, ComponentId>> =
+            OnceLock::new();
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
         *REGISTRY
