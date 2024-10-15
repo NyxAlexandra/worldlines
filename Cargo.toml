@@ -1,10 +1,10 @@
 [package]
 name = "archetypal-ecs"
-version = "0.1.0"
-edition = "2021"
 
-authors = ["Alexandra Reaves <nyxalexandra@proton.me>"]
-license = "MIT OR Apache-2.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
 
 [features]
 default = ["derive"]
@@ -21,6 +21,16 @@ indexmap = "2.4.0"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+
+[workspace]
+resolver = "2"
+members = ["macros"]
+
+[workspace.package]
+authors = ["Alexandra Reaves <nyxalexandra@proton.me>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
 
 # `bulk_spawn`
 
