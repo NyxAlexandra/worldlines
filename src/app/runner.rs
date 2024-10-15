@@ -4,26 +4,15 @@ use crate::App;
 
 /// A trait for types that can run an [`App`].
 pub trait AppRunner: 'static {
-    /// Run the schedules once.
-    fn tick(&mut self, app: &mut App) {
-        app.tick_all();
-    }
-
     /// Run this app.
     fn run(self: Box<Self>, app: App);
 }
 
 impl<F> AppRunner for F
 where
-    F: FnMut(&mut App) + 'static,
+    F: FnOnce(App) + 'static,
 {
-    fn tick(&mut self, app: &mut App) {
+    fn run(self: Box<F>, app: App) {
         self(app);
-    }
-
-    fn run(mut self: Box<Self>, mut app: App) {
-        loop {
-            self.tick(&mut app);
-        }
     }
 }

@@ -1,5 +1,4 @@
 pub use self::plugin::*;
-pub use self::runner::*;
 use crate::{
     IndexTypeMap,
     IntoSystemNodes,
@@ -12,13 +11,12 @@ use crate::{
 };
 
 mod plugin;
-mod runner;
 
 /// A runtime for an ECS.
 pub struct App {
     world: World,
     schedules: IndexTypeMap<ScheduleBox>,
-    runner: Option<Box<dyn AppRunner>>,
+    runner: Option<Box<dyn FnOnce(Self)>>,
 }
 
 /// A [`Schedule`] and systems that are a part of it.
@@ -85,42 +83,32 @@ impl App {
     }
 
     /// Set the runner for this app.
-    pub fn set_runner(&mut self, runner: impl AppRunner) {
+    pub fn set_runner(&mut self, runner: impl FnOnce(Self) + 'static) {
         self.runner = Some(Box::new(runner));
     }
 
     /// Calls [`App::set_runner`] and returns `self`.
-    pub fn and_set_runner(mut self, f: impl AppRunner) -> Self {
+    pub fn and_set_runner(mut self, f: impl FnOnce(Self) + 'static) -> Self {
         self.set_runner(f);
 
         self
     }
 
-    /// Run the app once.
-    pub fn tick(&mut self) {
-        if let Some(mut runner) = self.runner.take() {
-            runner.tick(self);
-
-            self.runner = Some(runner);
-        } else {
-            self.tick_all();
-        }
-    }
-
     /// Run all schedules.
-    pub fn tick_all(&mut self) {
+    pub fn tick(&mut self) {
         for ScheduleBox { schedule, systems } in self.schedules.values_mut() {
             schedule.run(&mut self.world, systems);
         }
     }
 
-    /// Continuously [ticks](App::tick) the app.
+    /// Invokes the runner on this app if present, otherwise calls [`App::tick`]
+    /// in a loop.
     pub fn run(mut self) {
         if let Some(runner) = self.runner.take() {
-            runner.run(self)
+            runner(self);
         } else {
             loop {
-                self.tick_all();
+                self.tick();
             }
         }
     }
