@@ -1,15 +1,21 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Field, Ident};
+use syn::parse::{Parse, ParseStream};
+use syn::{
+    parse_macro_input,
+    Data,
+    DataStruct,
+    DeriveInput,
+    Field,
+    Fields,
+    Generics,
+    Ident,
+};
 
 #[proc_macro_derive(Bundle)]
 pub fn derive_bundle(input: TokenStream) -> TokenStream {
-    let DeriveInput { ident, generics, data, .. } =
-        parse_macro_input!(input as DeriveInput);
-    let Data::Struct(DataStruct { fields, .. }) = data else {
-        panic!("`Bundle` can only be implemented on structs");
-    };
+    let DeriveBundle { ident, generics, fields } = parse_macro_input!(input);
 
     let len = fields.len();
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
@@ -61,4 +67,21 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+struct DeriveBundle {
+    ident: Ident,
+    generics: Generics,
+    fields: Fields,
+}
+
+impl Parse for DeriveBundle {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let DeriveInput { ident, generics, data, .. } = input.parse()?;
+        let Data::Struct(DataStruct { fields, .. }) = data else {
+            return Err(input.error("`Bundle` can only be derived for structs"));
+        };
+
+        Ok(Self { ident, generics, fields })
+    }
 }
