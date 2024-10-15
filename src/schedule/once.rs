@@ -45,7 +45,7 @@ mod tests {
             counter.0 += 1;
         }
 
-        let mut app = App::new().and_insert(Once, (increment_counter,));
+        let mut app = App::new().and_schedule(Once, (increment_counter,));
 
         app.world_mut().create(Counter(0));
 

@@ -56,7 +56,7 @@ impl App {
     }
 
     /// Inserts systems into a schedule.
-    pub fn insert<I: SystemInput>(
+    pub fn schedule<I: SystemInput>(
         &mut self,
         label: impl Label,
         systems: impl IntoSystemNodes<I>,
@@ -71,13 +71,13 @@ impl App {
             .extend(systems.into_system_nodes());
     }
 
-    /// Calls [`App::insert`] and returns `self`.
-    pub fn and_insert<I: SystemInput>(
+    /// Calls [`App::schedule`] and returns `self`.
+    pub fn and_schedule<I: SystemInput>(
         mut self,
         label: impl Label,
         systems: impl IntoSystemNodes<I>,
     ) -> Self {
-        self.insert(label, systems);
+        self.schedule(label, systems);
 
         self
     }
@@ -161,7 +161,7 @@ mod tests {
 
         let mut app = App::new();
 
-        app.insert(Main, (system_a, system_b));
+        app.schedule(Main, (system_a, system_b));
         app.tick();
 
         assert!(app.world.has::<A>());
