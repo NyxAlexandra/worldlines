@@ -11,11 +11,12 @@ use syn::{
     Fields,
     Generics,
     Ident,
+    Path,
 };
 
 #[proc_macro_derive(Bundle)]
 pub fn derive_bundle(input: TokenStream) -> TokenStream {
-    let DeriveBundle { ident, generics, fields } = parse_macro_input!(input);
+    let DeriveBundle { ident, generics, fields, crate_path } = parse_macro_input!(input);
 
     let len = fields.len();
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
@@ -36,23 +37,23 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
 
         quote! {
             (
-                ::archetypal_ecs::TypeData::of::<#ty>(),
+                ::#crate_path::TypeData::of::<#ty>(),
                 ::core::ptr::NonNull::from(&mut self.#ident).cast(),
             )
         }
     });
 
     quote! {
-        unsafe impl #impl_generics ::archetypal_ecs::Bundle for #ident #type_generics
+        unsafe impl #impl_generics ::#crate_path::Bundle for #ident #type_generics
         #where_clause
         {
             type TakeIter = <
-                [(::archetypal_ecs::TypeData, ::core::ptr::NonNull<u8>); #len]
+                [(::#crate_path::TypeData, ::core::ptr::NonNull<u8>); #len]
                 as ::core::iter::IntoIterator
             >::IntoIter;
 
-            fn types() -> ::archetypal_ecs::TypeSet {
-                let mut out = ::archetypal_ecs::TypeSet::new();
+            fn types() -> ::#crate_path::TypeSet {
+                let mut out = ::#crate_path::TypeSet::new();
 
                 #(#insert_field_types)*
 
@@ -73,6 +74,7 @@ struct DeriveBundle {
     ident: Ident,
     generics: Generics,
     fields: Fields,
+    crate_path: Path,
 }
 
 impl Parse for DeriveBundle {
@@ -82,6 +84,9 @@ impl Parse for DeriveBundle {
             return Err(input.error("`Bundle` can only be derived for structs"));
         };
 
-        Ok(Self { ident, generics, fields })
+        let crate_path = option_env!("ARCHETYPAL_ECS_PATH").unwrap_or("archetypal_ecs");
+        let crate_path = syn::parse_str(crate_path)?;
+
+        Ok(Self { ident, generics, fields, crate_path })
     }
 }

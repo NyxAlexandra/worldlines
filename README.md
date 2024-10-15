@@ -33,3 +33,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 ```
+
+## Re-exporting in other crates
+
+If you're a library author who wants to re-export derive macros from this crate, set
+`ARCHETYPAL_ECS_PATH` to `my_crate::archetypal_ecs` in a `build.rs` file or similar.
