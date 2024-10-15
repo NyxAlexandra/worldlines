@@ -1,7 +1,7 @@
 use std::ptr::NonNull;
 
 #[cfg(feature = "derive")]
-pub use macros::Bundle;
+pub use archetypal_ecs_macros::Bundle;
 
 use crate::{TypeData, TypeSet};
 

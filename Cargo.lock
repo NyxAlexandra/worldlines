@@ -27,12 +27,21 @@ checksum = "1bec1de6f59aedf83baf9ff929c98f2ad654b97c9510f4e70cf6f661d49fd5b1"
 name = "archetypal-ecs"
 version = "0.1.0"
 dependencies = [
+ "archetypal-ecs-macros",
  "atomic_refcell",
  "criterion",
  "dashmap",
  "indexmap",
- "macros",
  "thiserror",
+]
+
+[[package]]
+name = "archetypal-ecs-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -304,15 +313,6 @@ name = "log"
 version = "0.4.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
-
-[[package]]
-name = "macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "memchr"
