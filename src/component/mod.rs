@@ -23,7 +23,7 @@ impl<C: Send + Sync + 'static> Component for C {}
 /// A unique identifer for a [`Component`].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ComponentId(usize);
+pub(crate) struct ComponentId(usize);
 
 impl ComponentId {
     pub fn of<T: 'static>() -> Self {
