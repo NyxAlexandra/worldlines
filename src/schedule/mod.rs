@@ -1,4 +1,7 @@
+pub use self::once::*;
 use crate::{SystemNode, World};
+
+mod once;
 
 /// A label for a [`Schedule`].
 pub trait Label: 'static {
