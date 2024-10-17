@@ -1,11 +1,16 @@
 use std::fmt;
 
+use thiserror::Error;
+
 pub(crate) use self::allocator::*;
 pub use self::ptr::*;
+pub use self::world::*;
 use crate::{
+    Component,
     QueryData,
     ReadOnlyQueryData,
     SparseIndex,
+    TypeData,
     World,
     WorldAccess,
     WorldPtr,
@@ -13,6 +18,7 @@ use crate::{
 
 mod allocator;
 mod ptr;
+mod world;
 
 /// A identifier for an entity in a [`World`].
 #[repr(C)]
@@ -33,6 +39,32 @@ pub struct EntitiesIter<'w> {
 pub struct EntitiesIterMut<'w> {
     pub(crate) world: WorldPtr<'w>,
     pub(crate) ids: EntityIterIds<'w>,
+}
+
+/// Error when trying to access an [`Entity`] that cannot be found.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, Error)]
+#[error("entity {0:?} not found")]
+pub struct EntityNotFound(pub(crate) Entity);
+
+/// Error when accessing a [`Component`] an [`Entity`] does not contain.
+#[derive(Clone, Copy, PartialEq, Error)]
+#[error("component {component} not found for entity {entity:?}")]
+pub struct ComponentNotFound {
+    entity: Entity,
+    component: TypeData,
+}
+
+impl ComponentNotFound {
+    fn new<C: Component>(entity: Entity) -> Self {
+        Self { entity, component: TypeData::of::<C>() }
+    }
+}
+
+impl fmt::Debug for ComponentNotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
 }
 
 impl SparseIndex for Entity {
@@ -96,5 +128,68 @@ impl<'w> Iterator for EntitiesIterMut<'w> {
 impl ExactSizeIterator for EntitiesIterMut<'_> {
     fn len(&self) -> usize {
         self.ids.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::World;
+
+    #[test]
+    fn len() {
+        struct A;
+        struct B;
+
+        let mut world = World::new();
+
+        let e0 = world.spawn((A,)).id();
+        let e1 = world.spawn((A, B)).id();
+
+        assert_eq!(world.entity(e0).unwrap().len(), 1);
+        assert_eq!(world.entity(e1).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn insert() {
+        struct Name(&'static str);
+        struct Age(u32);
+
+        let mut world = World::new();
+        let mut entity = world.spawn((Name("Sasha"),));
+
+        assert_eq!(entity.get::<Name>().unwrap().0, "Sasha");
+
+        assert!(entity.insert(Age(123)).is_none());
+
+        assert_eq!(entity.get::<Name>().unwrap().0, "Sasha");
+        assert_eq!(entity.get::<Age>().unwrap().0, 123);
+    }
+
+    #[test]
+    fn remove() {
+        struct Name(&'static str);
+        struct Age(#[allow(dead_code)] u32);
+
+        let mut world = World::new();
+        let mut entity = world.spawn((Name("Sasha"), Age(u32::MAX)));
+
+        assert!(entity.remove::<Age>().is_ok());
+        assert_eq!(entity.get::<Name>().unwrap().0, "Sasha");
+        assert!(entity.get::<Age>().is_err());
+    }
+
+    #[test]
+    fn component_not_found() {
+        struct A;
+        struct B;
+
+        let mut world = World::new();
+        let entity = world.spawn((A,));
+
+        assert_eq!(
+            entity.get::<B>().err(),
+            Some(ComponentNotFound::new::<B>(entity.id())),
+        );
     }
 }
