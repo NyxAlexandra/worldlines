@@ -16,6 +16,15 @@ use crate::{
     WorldPtr,
 };
 
+/// A pointer to an entity.
+///
+/// Does not guarantee liveness of the entity.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EntityPtr<'w> {
+    pub(crate) world: WorldPtr<'w>,
+    pub(crate) entity: Entity,
+}
+
 /// An immutable reference to an entity.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -27,15 +36,6 @@ pub struct EntityRef<'w> {
 #[repr(transparent)]
 pub struct EntityMut<'w> {
     pub(crate) inner: EntityPtr<'w>,
-}
-
-/// A pointer to an entity.
-///
-/// Does not guarantee liveness of the entity.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EntityPtr<'w> {
-    pub(crate) world: WorldPtr<'w>,
-    pub(crate) entity: Entity,
 }
 
 impl<'w> EntityPtr<'w> {

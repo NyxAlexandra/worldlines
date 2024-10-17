@@ -4,12 +4,15 @@ use std::any::TypeId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
+#[cfg(feature = "derive")]
+pub use archetypal_ecs_macros::Component;
 use dashmap::DashMap;
 
 pub(self) use self::column::*;
 pub(crate) use self::storage::*;
 pub(crate) use self::table::*;
 use crate::{
+    EntityMut,
     EntityPtr,
     QueryData,
     ReadOnlyQueryData,
@@ -22,9 +25,15 @@ mod storage;
 mod table;
 
 /// A single value in an ECS.
-pub trait Component: Send + Sync + 'static {}
+pub trait Component: Send + Sync + 'static {
+    /// Hook that is called when this component is inserted into an entity.
+    #[expect(unused_variables)]
+    fn on_insert(entity: EntityMut<'_>) {}
 
-impl<C: Send + Sync + 'static> Component for C {}
+    /// Hook that is called when this component is removed from an entity.
+    #[expect(unused_variables)]
+    fn on_remove(entity: EntityMut<'_>) {}
+}
 
 /// A unique identifer for a [`Component`].
 #[repr(transparent)]

@@ -17,13 +17,19 @@ impl<F: QueryFilterSet> QueryFilter for AnyOf<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Contains, Entity, World};
+    use crate::{Component, Contains, Entity, World};
+
+    #[derive(Component)]
+    struct A;
+
+    #[derive(Component)]
+    struct B;
+
+    #[derive(Component)]
+    struct C;
 
     #[test]
     fn any_of_just_one() {
-        struct A;
-        struct B;
-
         let mut world = World::new();
 
         let e0 = world.spawn((A,)).id();
@@ -39,10 +45,6 @@ mod tests {
 
     #[test]
     fn any_of_query() {
-        struct A;
-        struct B;
-        struct C;
-
         let mut world = World::new();
 
         let e0 = world.spawn((A,)).id();

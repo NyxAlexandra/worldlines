@@ -2,8 +2,13 @@ use std::error::Error;
 
 use archetypal_ecs::*;
 
+#[derive(Component)]
 struct Person;
+
+#[derive(Component)]
 struct Dog;
+
+#[derive(Component)]
 struct Name(&'static str);
 
 fn main() -> Result<(), Box<dyn Error>> {

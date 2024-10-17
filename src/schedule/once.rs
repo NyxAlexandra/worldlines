@@ -35,10 +35,11 @@ impl Schedule for _Once {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{App, ResMut};
+    use crate::{App, Component, ResMut};
 
     #[test]
     fn once_system_run_only_once() {
+        #[derive(Component)]
         struct Counter(usize);
 
         fn increment_counter(mut counter: ResMut<Counter>) {

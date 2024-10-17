@@ -120,24 +120,31 @@ impl fmt::Debug for ResourceBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Component;
+
+    #[derive(Component, Debug, PartialEq)]
+    struct Counter(u32);
+
+    #[derive(Component, Debug)]
+    struct NotCounter;
 
     #[test]
     fn resource_box_get() {
-        let resource = ResourceBox::new(true);
+        let resource = ResourceBox::new(Counter(0));
 
         unsafe {
-            let _borrow = resource.get::<bool>().unwrap();
+            let _borrow = resource.get::<Counter>().unwrap();
 
-            assert!(resource.get::<bool>().is_ok());
-            assert!(resource.get_mut::<bool>().is_err());
+            assert!(resource.get::<Counter>().is_ok());
+            assert!(resource.get_mut::<Counter>().is_err());
         }
     }
 
     #[test]
     fn resource_box_into_inner() {
-        let resource = ResourceBox::new::<i32>(123);
-        let resource = resource.into_inner::<u32>().unwrap_err();
+        let resource = ResourceBox::new(Counter(123));
+        let resource = resource.into_inner::<NotCounter>().unwrap_err();
 
-        assert_eq!(resource.into_inner::<i32>().ok(), Some(123));
+        assert_eq!(resource.into_inner::<Counter>().ok(), Some(Counter(123)));
     }
 }

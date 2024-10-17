@@ -7,6 +7,7 @@ pub use self::ptr::*;
 use crate::{
     array,
     Bundle,
+    BundleWriter,
     Components,
     Entities,
     EntitiesIter,
@@ -184,9 +185,14 @@ impl World {
         let entity = self.entities.alloc();
 
         unsafe {
-            let table = self.components.alloc(entity, bundle);
+            let table = self.components.alloc::<B>(entity);
 
             self.entities.set(entity, table);
+
+            let mut writer =
+                BundleWriter::new(self.as_ptr_mut().entity(entity));
+
+            bundle.take(&mut writer);
         }
 
         // SAFETY: the entity is alive
@@ -205,8 +211,7 @@ impl World {
         let (lower, upper) = bundles.size_hint();
         let count = upper.unwrap_or(lower);
 
-        let id = self.components.reserve::<B>(count);
-        let table = unsafe { self.components.table_mut(id).unwrap_unchecked() };
+        let table = self.components.reserve::<B>(count);
 
         let mut allocated = self.entities.alloc_many(count);
         let start = allocated.start;
@@ -231,13 +236,12 @@ impl World {
                 }
             };
 
-            self.entities.set(entity, id);
-            table.insert(entity);
-            bundle.take(|components| {
-                for (component, ptr) in components {
-                    unsafe { table.write_ptr(entity, component, ptr.as_ptr()) };
-                }
-            });
+            self.entities.set(entity, table);
+
+            let mut writer =
+                BundleWriter::new(self.as_ptr_mut().entity(entity));
+
+            bundle.take(&mut writer);
         }
 
         SpawnIter {
@@ -382,12 +386,16 @@ impl ExactSizeIterator for SpawnIter<'_> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Component;
 
     #[test]
     #[cfg_attr(miri, ignore)]
     fn spawn_many() {
-        struct A(#[allow(dead_code)] u32);
-        struct B(#[allow(dead_code)] u64);
+        #[derive(Component)]
+        struct A(#[expect(unused)] u32);
+
+        #[derive(Component)]
+        struct B(#[expect(unused)] u64);
 
         let mut world = World::new();
 
@@ -399,8 +407,11 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn spawn_big_iter() {
-        struct A(#[allow(dead_code)] u32);
-        struct B(#[allow(dead_code)] u64);
+        #[derive(Component)]
+        struct A(#[expect(unused)] u32);
+
+        #[derive(Component)]
+        struct B(#[expect(unused)] u64);
 
         let mut world = World::new();
 
@@ -442,25 +453,42 @@ mod tests {
 
     #[test]
     fn spawn_iter() {
+        #[derive(Component, Debug, PartialEq)]
+        struct Name(&'static str);
+
+        #[derive(Component, Debug, PartialEq)]
+        struct Age(u32);
+
         let mut world = World::new();
 
-        world.spawn_iter([("e0", 0), ("e1", 1), ("e2", 2)]);
+        world.spawn_iter([
+            (Name("e0"), Age(0)),
+            (Name("e1"), Age(1)),
+            (Name("e2"), Age(2)),
+        ]);
 
         println!("{:#?}", world);
 
-        let mut iter = world.query::<(&&str, &i32), ()>().unwrap();
+        let mut iter = world.query::<(&Name, &Age), ()>().unwrap();
 
-        assert_eq!(iter.next(), Some((&"e0", &0)));
-        assert_eq!(iter.next(), Some((&"e1", &1)));
-        assert_eq!(iter.next(), Some((&"e2", &2)));
+        assert_eq!(iter.next(), Some((&Name("e0"), &Age(0))));
+        assert_eq!(iter.next(), Some((&Name("e1"), &Age(1))));
+        assert_eq!(iter.next(), Some((&Name("e2"), &Age(2))));
         assert!(iter.next().is_none());
     }
 
     #[test]
     fn query_mut() {
+        #[derive(Component)]
         struct Human;
+
+        #[derive(Component)]
         struct Goblin;
+
+        #[derive(Component)]
         struct Hp(u32);
+
+        #[derive(Component)]
         struct Poisoned(u32);
 
         let mut world = World::new();

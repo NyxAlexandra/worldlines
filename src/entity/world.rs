@@ -114,11 +114,19 @@ impl<'w> EntityWorld<'w> {
     /// present).
     pub fn insert<C: Component>(&mut self, component: C) -> Option<C> {
         if unsafe { self.inner.table() }.header().contains::<C>() {
+            // replacing old value
+
             let table = unsafe { self.inner.table_mut() };
 
             table.replace(self.inner.entity, component)
         } else {
+            // inserting new value
+
+            // SAFETY: the entity is alive and the world pointer is valid for
+            // writes
             unsafe {
+                C::on_insert(self.as_mut());
+
                 let old_table = self.inner.table_id();
                 let new_table = {
                     let components = self.inner.world.components_mut();
@@ -163,6 +171,8 @@ impl<'w> EntityWorld<'w> {
             .header()
             .contains::<C>()
             .then(|| unsafe {
+                C::on_remove(self.as_mut());
+
                 let old_table = self.inner.table_id();
                 let new_table = {
                     let components = self.inner.world.components_mut();

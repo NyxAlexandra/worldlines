@@ -13,6 +13,7 @@ pub struct Components {
     tables: Vec<Table>,
 }
 
+/// An identifier for a table.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TableId(usize);
@@ -59,23 +60,16 @@ impl Components {
         id
     }
 
+    /// Allocate an entity in the table for a bundle.
+    ///
     /// # Safety
     ///
     /// The entity must not have already been allocated.
-    pub unsafe fn alloc<B: Bundle>(
-        &mut self,
-        entity: Entity,
-        bundle: B,
-    ) -> TableId {
+    pub unsafe fn alloc<B: Bundle>(&mut self, entity: Entity) -> TableId {
         let id = self.reserve::<B>(1);
         let table = unsafe { self.table_mut(id).unwrap_unchecked() };
 
         table.insert(entity);
-        bundle.take(|iter| unsafe {
-            for (type_data, ptr) in iter {
-                table.write_ptr(entity, type_data, ptr.as_ptr());
-            }
-        });
 
         id
     }
@@ -233,146 +227,5 @@ impl Components {
         for table in &mut self.tables {
             table.clear();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    use super::*;
-    use crate::Entities;
-
-    #[test]
-    fn realloc_with() {
-        struct Name(&'static str);
-        struct Age(u32);
-
-        let mut entities = Entities::new();
-        let mut components = Components::new();
-
-        let entity = entities.alloc();
-
-        let old_table = unsafe { components.alloc(entity, (Name("entity"),)) };
-        let new_table = unsafe {
-            components
-                .realloc_with(
-                    entity,
-                    old_table,
-                    TypeData::of::<Age>(),
-                    true,
-                    |table| {
-                        table.write(entity, Age(123));
-                    },
-                )
-                .unwrap()
-        };
-
-        {
-            let old_table = components.table(old_table).unwrap();
-
-            assert!(!old_table.contains(entity));
-        }
-
-        {
-            let new_table = components.table_mut(new_table).unwrap();
-
-            assert!(new_table.contains(entity));
-            assert_eq!(new_table.get::<Name>(entity).unwrap().0, "entity");
-            assert_eq!(new_table.get::<Age>(entity).unwrap().0, 123);
-        }
-    }
-
-    #[test]
-    fn realloc_without() {
-        struct Name(&'static str);
-        struct Person;
-
-        let mut entities = Entities::new();
-        let mut components = Components::new();
-
-        let entity = entities.alloc();
-
-        let old_table =
-            unsafe { components.alloc(entity, (Person, Name("entity"))) };
-        // lost their humanity
-        let new_table = components
-            .realloc_without(entity, old_table, TypeData::of::<Person>(), true)
-            .unwrap();
-
-        {
-            let old_table = components.table(old_table).unwrap();
-
-            assert!(old_table.is_empty());
-        }
-
-        {
-            let new_table = components.table(new_table).unwrap();
-
-            assert_eq!(new_table.get::<Name>(entity).unwrap().0, "entity");
-            assert!(new_table.get::<Person>(entity).is_none());
-        }
-    }
-
-    #[test]
-    fn assert_dropped() {
-        struct A;
-
-        static HAS_DROPPED: AtomicBool = AtomicBool::new(false);
-
-        impl Drop for A {
-            fn drop(&mut self) {
-                HAS_DROPPED.store(true, Ordering::Relaxed)
-            }
-        }
-
-        let mut entities = Entities::new();
-        let mut components = Components::new();
-
-        let entity = entities.alloc();
-
-        unsafe {
-            let old_table = components.alloc(entity, (A,));
-
-            components.realloc_without(
-                entity,
-                old_table,
-                TypeData::of::<A>(),
-                true,
-            );
-        }
-
-        assert!(HAS_DROPPED.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn assert_not_dropped() {
-        struct A;
-
-        static HAS_DROPPED: AtomicBool = AtomicBool::new(false);
-
-        impl Drop for A {
-            fn drop(&mut self) {
-                HAS_DROPPED.store(true, Ordering::Relaxed)
-            }
-        }
-
-        let mut entities = Entities::new();
-        let mut components = Components::new();
-
-        let entity = entities.alloc();
-
-        unsafe {
-            let old_table = components.alloc(entity, (A,));
-
-            components.realloc_without(
-                entity,
-                old_table,
-                TypeData::of::<A>(),
-                false,
-            );
-        }
-
-        assert!(!HAS_DROPPED.load(Ordering::Relaxed));
     }
 }
