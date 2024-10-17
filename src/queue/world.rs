@@ -1,5 +1,6 @@
 use crate::{
     Bundle,
+    BundleWriter,
     CommandQueue,
     Entities,
     Entity,
@@ -37,8 +38,11 @@ impl<'w, 's> WorldQueue<'w, 's> {
         let entity = self.entities.reserve();
 
         self.queue.push_fn(move |world| {
-            let table = unsafe { world.components.alloc(entity, bundle) };
+            let table = unsafe { world.components.alloc::<B>(entity) };
+            let mut writer =
+                BundleWriter::new(world.as_ptr_mut().entity(entity));
 
+            bundle.take(&mut writer);
             world.entities.set(entity, table);
         });
 

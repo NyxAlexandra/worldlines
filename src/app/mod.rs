@@ -122,6 +122,8 @@ impl Default for App {
 
 #[cfg(test)]
 mod tests {
+    use archetypal_ecs_macros::Component;
+
     use super::*;
     use crate::WorldAccess;
 
@@ -129,7 +131,10 @@ mod tests {
     fn basic_schedule() {
         struct Main;
 
+        #[derive(Component)]
         struct A;
+
+        #[derive(Component)]
         struct B;
 
         impl Schedule for Main {

@@ -228,6 +228,12 @@ mod tests {
     use super::*;
     use crate::{Component, Entity, EntityMut, World};
 
+    #[derive(Component)]
+    struct A;
+
+    #[derive(Component)]
+    struct B;
+
     fn _assert_impls<C: Component, F: QueryFilter>() {
         fn assert_query_data<D: QueryData>() {}
         fn assert_query_filter<F: QueryFilter>() {}
@@ -248,11 +254,17 @@ mod tests {
 
     #[test]
     fn query_no_filter() {
+        #[derive(Component)]
+        struct Name(#[expect(unused)] &'static str);
+
+        #[derive(Component)]
+        struct Bald;
+
         let mut world = World::new();
 
-        let e0 = world.spawn(("e0",)).id();
-        let e1 = world.spawn(("e1", true)).id();
-        let e2 = world.spawn((true,)).id();
+        let e0 = world.spawn((Name("e0"),)).id();
+        let e1 = world.spawn((Name("e1"), Bald)).id();
+        let e2 = world.spawn((Bald,)).id();
 
         let mut query = world.query::<Entity, ()>().unwrap();
 
@@ -264,7 +276,10 @@ mod tests {
 
     #[test]
     fn query_component() {
+        #[derive(Component)]
         struct A(u32);
+
+        #[derive(Component)]
         struct B;
 
         let mut world = World::new();
@@ -282,6 +297,7 @@ mod tests {
 
     #[test]
     fn invalid_multiple_borrow() {
+        #[derive(Component)]
         struct A;
 
         let mut world = World::new();
@@ -293,9 +309,6 @@ mod tests {
 
     #[test]
     fn valid_multiple_borrow() {
-        struct A;
-        struct B;
-
         let mut world = World::new();
 
         assert!(world.query_mut::<(&mut A, &mut B), ()>().is_ok());
@@ -318,17 +331,10 @@ mod tests {
 
     #[test]
     fn entity_and_component_borrow() {
+        #[derive(Component)]
         struct A;
 
         let mut world = World::new();
-
-        {
-            let mut access = WorldAccess::new();
-
-            <(&mut A, EntityRef)>::access(&mut access);
-
-            println!("<(&mut A, EntityRef)>::access(); -> {:?}", access);
-        }
 
         assert!(world.query::<(&A, EntityRef<'_>), ()>().is_ok());
         assert!(world.query_mut::<(&mut A, EntityRef<'_>), ()>().is_err());

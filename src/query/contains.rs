@@ -14,11 +14,16 @@ use crate::{
 /// contains a component or filter only entities that contain the component.
 ///
 /// ```
-/// # use archetypal_ecs::{Query, Contains};
+/// # use archetypal_ecs::{Query, Contains, Component};
 /// #
-/// struct A;
-/// struct B;
-/// struct C;
+/// # #[derive(Component)]
+/// # struct A;
+/// #
+/// # #[derive(Component)]
+/// # struct B;
+/// #
+/// # #[derive(Component)]
+/// # struct C;
 ///
 /// fn system(mut query: Query<(&A, Contains<B>), Contains<C>>) {
 ///     for (a, contains_b) in query {
@@ -55,7 +60,10 @@ mod tests {
 
     #[test]
     fn filter_not_contains() {
+        #[derive(Component)]
         struct Poisoned;
+
+        #[derive(Component)]
         struct Hp(u32);
 
         let mut world = World::new();

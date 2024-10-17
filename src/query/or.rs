@@ -14,12 +14,17 @@ impl<A: QueryFilter, B: QueryFilter> QueryFilter for Or<A, B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Contains, Entity, World};
+    use crate::{Component, Contains, Entity, World};
 
     #[test]
     fn or_query() {
+        #[derive(Component)]
         struct A;
+
+        #[derive(Component)]
         struct B;
+
+        #[derive(Component)]
         struct C;
 
         let mut world = World::new();

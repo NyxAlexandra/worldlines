@@ -1,9 +1,7 @@
-use std::ptr::NonNull;
-
 #[cfg(feature = "derive")]
 pub use archetypal_ecs_macros::Bundle;
 
-use crate::{TypeData, TypeSet};
+use crate::{Component, EntityPtr, TypeSet};
 
 /// Trait for bundling components that are often added together.
 ///
@@ -18,22 +16,40 @@ use crate::{TypeData, TypeSet};
 /// - The [`TypeData`] and pointers must match and the pointer must point to a
 ///   valid instance of the described type.
 pub unsafe trait Bundle: Send + 'static {
-    /// The iterator constructed in [`Bundle::take`].
-    type TakeIter: Iterator<Item = (TypeData, NonNull<u8>)>;
-
     /// The types in this bundle.
     fn types() -> TypeSet;
 
     /// Take each component out of the bundle.
-    ///
-    /// The function `f` is on an iterator over pointers to each component in
-    /// the bundle. After `f` is called, each component is considered to be
-    /// moved.
-    fn take(self, f: impl FnOnce(Self::TakeIter));
+    fn take(self, writer: &mut BundleWriter<'_>);
 }
 
-macro_rules! no_op {
-    ($_:tt) => {};
+/// A type used by [`Bundle::take`] to write components to an entity.
+pub struct BundleWriter<'w> {
+    inner: EntityPtr<'w>,
+}
+
+impl<'w> BundleWriter<'w> {
+    pub(crate) fn new(inner: EntityPtr<'w>) -> Self {
+        Self { inner }
+    }
+
+    /// Writes a component to an entity's storage.
+    pub fn write<C: Component>(&mut self, component: C) {
+        unsafe {
+            C::on_insert(self.inner.as_mut());
+            self.inner.table_mut().write(self.inner.entity, component)
+        };
+    }
+}
+
+unsafe impl<C: Component> Bundle for C {
+    fn types() -> TypeSet {
+        TypeSet::new().with::<C>()
+    }
+
+    fn take(self, writer: &mut BundleWriter<'_>) {
+        writer.write(self);
+    }
 }
 
 macro_rules! impl_bundle {
@@ -44,37 +60,27 @@ macro_rules! impl_bundle {
     ([$($t:ident)*] []) => {
         unsafe impl<$($t),*> Bundle for ($($t,)*)
         where
-            Self: 'static,
-            $($t: crate::Component),*
+            $($t: Bundle),*
         {
-            // this is so silly :3
-            type TakeIter = <[(TypeData, NonNull<u8>); {
-                #[allow(unused_mut)]
-                let mut len = 0;
+            fn types() -> TypeSet {
+                let iter = ::core::iter::empty();
 
                 $(
-                    no_op!($t);
-
-                    len += 1;
+                    let types = $t::types();
+                    let iter = iter.chain(types.iter());
                 )*
 
-                len
-            }] as IntoIterator>::IntoIter;
-
-            fn types() -> TypeSet {
-                TypeSet::from_iter([$(TypeData::of::<$t>()),*])
+                TypeSet::from_iter(iter)
             }
 
-            fn take(mut self, f: impl FnOnce(Self::TakeIter)) {
+            #[allow(unused)]
+            fn take(mut self, writer: &mut BundleWriter<'_>) {
                 #[allow(non_snake_case)]
-                let ($($t,)*) = &mut self;
+                let ($($t,)*) = self;
 
-                f([
-                    $((TypeData::of::<$t>(), NonNull::from($t).cast())),*
-                ].into_iter());
-
-                #[allow(forgetting_copy_types)]
-                ::std::mem::forget(self);
+                $(
+                    $t.take(writer);
+                )*
             }
         }
     };
@@ -97,8 +103,15 @@ mod tests {
     #[test]
     #[cfg(feature = "derive")]
     fn derived_bundle_correctly_inserts() {
+        use crate::Component;
+
+        #[derive(Component)]
         struct Person;
+
+        #[derive(Component)]
         struct Name(&'static str);
+
+        #[derive(Component)]
         struct Age(u32);
 
         #[derive(Bundle)]

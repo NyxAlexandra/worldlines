@@ -1,12 +1,13 @@
 use std::time::Duration;
 
-use archetypal_ecs::World;
+use archetypal_ecs::{Component, World};
 use criterion::{criterion_group, criterion_main, Criterion};
 
-#[allow(unused)]
-struct A(u32);
-#[allow(unused)]
-struct B(u64);
+#[derive(Component)]
+struct A(#[expect(unused)] u32);
+
+#[derive(Component)]
+struct B(#[expect(unused)] u64);
 
 fn benchmark(c: &mut Criterion) {
     c.bench_function("bulk_remove", |bencher| {

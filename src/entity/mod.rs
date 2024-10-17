@@ -138,7 +138,10 @@ mod tests {
 
     #[test]
     fn len() {
+        #[derive(Component)]
         struct A;
+
+        #[derive(Component)]
         struct B;
 
         let mut world = World::new();
@@ -152,7 +155,10 @@ mod tests {
 
     #[test]
     fn insert() {
+        #[derive(Component)]
         struct Name(&'static str);
+
+        #[derive(Component)]
         struct Age(u32);
 
         let mut world = World::new();
@@ -168,7 +174,10 @@ mod tests {
 
     #[test]
     fn remove() {
+        #[derive(Component)]
         struct Name(&'static str);
+
+        #[derive(Component)]
         struct Age(#[allow(dead_code)] u32);
 
         let mut world = World::new();
@@ -181,7 +190,10 @@ mod tests {
 
     #[test]
     fn component_not_found() {
+        #[derive(Component)]
         struct A;
+
+        #[derive(Component)]
         struct B;
 
         let mut world = World::new();
@@ -191,5 +203,48 @@ mod tests {
             entity.get::<B>().err(),
             Some(ComponentNotFound::new::<B>(entity.id())),
         );
+    }
+
+    #[test]
+    fn on_insert() {
+        struct A;
+
+        #[derive(Component)]
+        struct B(u32);
+
+        impl Component for A {
+            fn on_insert(mut entity: EntityMut<'_>) {
+                entity.get_mut::<B>().unwrap().0 += 1;
+            }
+        }
+
+        let mut world = World::new();
+        let mut entity = world.spawn(());
+
+        entity.insert(B(0));
+        entity.insert(A);
+
+        assert_eq!(entity.get::<B>().unwrap().0, 1);
+    }
+
+    #[test]
+    fn on_remove() {
+        struct A;
+
+        #[derive(Component)]
+        struct B(u32);
+
+        impl Component for A {
+            fn on_remove(mut entity: EntityMut<'_>) {
+                entity.get_mut::<B>().unwrap().0 -= 1;
+            }
+        }
+
+        let mut world = World::new();
+        let mut entity = world.spawn((A, B(1)));
+
+        entity.remove::<A>().unwrap();
+
+        assert_eq!(entity.get::<B>().unwrap().0, 0);
     }
 }
