@@ -1,229 +1,247 @@
-use std::ops::{Deref, DerefMut};
-use std::ptr;
+use std::marker::PhantomData;
+use std::ptr::NonNull;
 
-use super::{
-    ComponentNotFound,
-    Entity,
-    EntityMut,
-    EntityNotFound,
-    EntityPtr,
-    EntityRef,
-};
-use crate::{Component, TypeData, World};
+use super::{EntityId, EntityMut, EntityNotFound, EntityRef};
+use crate::component::{Component, ComponentNotFound};
+use crate::world::World;
 
-/// A mutable reference to an entity and the world.
-#[repr(transparent)]
+/// A borrow of an entity and the world it resides in.
+///
+/// Allows structural changes (insertion, removal, and despawning).
 pub struct EntityWorld<'w> {
-    pub(crate) inner: EntityPtr<'w>,
+    id: EntityId,
+    world: NonNull<World>,
+    _lt: PhantomData<&'w World>,
 }
 
 impl<'w> EntityWorld<'w> {
-    pub(crate) fn new(
+    /// Creates a new entity world.
+    ///
+    /// Returns an error if the entity doesn't exist in the world.
+    pub fn new(
+        id: EntityId,
         world: &'w mut World,
-        entity: Entity,
     ) -> Result<Self, EntityNotFound> {
-        world
-            .contains(entity)
-            .then(|| Self { inner: world.as_ptr_mut().entity(entity) })
-            .ok_or(EntityNotFound(entity))
-    }
-
-    /// The [`Entity`] this points to.
-    pub const fn id(&self) -> Entity {
-        self.inner.id()
-    }
-
-    /// Get the inner [`EntityPtr`].
-    pub fn as_ptr(&self) -> EntityPtr<'w> {
-        self.inner
-    }
-
-    /// The amount of components in this entity.
-    pub fn len(&self) -> usize {
-        self.as_ref().len()
-    }
-
-    /// Returns `true` if this entity has no components.
-    pub fn is_empty(&self) -> bool {
-        self.as_ref().is_empty()
-    }
-
-    /// Borrow this entity as an [`EntityRef`].
-    pub fn as_ref(&self) -> EntityRef<'w> {
-        EntityRef { inner: self.inner }
-    }
-
-    /// Borrow this entity as an [`EntityMut`].
-    pub fn as_mut(&mut self) -> EntityMut<'w> {
-        EntityMut { inner: self.inner }
-    }
-
-    /// Despawns this entity.
-    pub fn despawn(self) {
-        unsafe {
-            self.inner.world.as_mut().despawn(self.id()).unwrap();
+        if world.contains(id) {
+            Ok(unsafe { Self::new_unchecked(id, world) })
+        } else {
+            Err(EntityNotFound(id))
         }
     }
-}
 
-/// Methods for accessing components.
-impl<'w> EntityWorld<'w> {
+    /// Creates a new entity world without verifying that the entity exists.
+    ///
+    /// # Safety
+    ///
+    /// The entity must be alive in the world.
+    pub unsafe fn new_unchecked(id: EntityId, world: &'w mut World) -> Self {
+        let world = NonNull::from(world);
+
+        Self { id, world, _lt: PhantomData }
+    }
+
+    /// Returns the id of this entity.
+    pub const fn id(&self) -> EntityId {
+        self.id
+    }
+
+    pub(crate) fn world(&self) -> &'w World {
+        // SAFETY: this pointer is equivalent to a mutable world reference
+        unsafe { self.world.as_ref() }
+    }
+
+    pub(crate) fn world_mut(&mut self) -> &'w mut World {
+        // SAFETY: this pointer is equivalent to a mutable world reference
+        unsafe { self.world.as_mut() }
+    }
+
+    /// Borrows this entity as an [`EntityRef`].
+    pub fn as_ref(&self) -> EntityRef<'w> {
+        unsafe { EntityRef::new_unchecked(self.id, self.world()) }
+    }
+
+    /// Borrows this entity as an [`EntityMut`].
+    pub fn as_mut(&mut self) -> EntityMut<'w> {
+        // SAFETY: the existence of this reference ensures that that entity is
+        // alive
+        unsafe { EntityMut::new_unchecked(self.id, self.world_mut()) }
+    }
+
     /// Returns `true` if this entity contains the component.
     pub fn contains<C: Component>(&self) -> bool {
         self.as_ref().contains::<C>()
     }
 
-    /// Borrow a component of this entity.
+    /// Returns a reference to a component of this entity.
+    ///
+    /// Returns an error if the component doesn't exist.
     pub fn get<C: Component>(&self) -> Result<&'w C, ComponentNotFound> {
         self.as_ref().get()
     }
 
-    /// Mutably borrow a component of this entity.
+    /// Returns a mutable reference to a component of this entity.
+    ///
+    /// Returns an error if the component doesn't exist.
     pub fn get_mut<C: Component>(
         &mut self,
     ) -> Result<&'w mut C, ComponentNotFound> {
         self.as_mut().get_mut()
     }
 
-    /// Returns a mutable reference to a component, inserting it if the entity
-    /// doesn't have it.
-    pub fn get_or_insert<C: Component>(&mut self, component: C) -> &'w mut C {
-        self.get_or_insert_with(|| component)
-    }
-
-    /// Returns a mutable reference to a component, inserting it if the entity
-    /// doesn't have it.
-    pub fn get_or_insert_with<C: Component>(
-        &mut self,
-        component: impl FnOnce() -> C,
-    ) -> &'w mut C {
-        if !self.contains::<C>() {
-            self.insert(component()).unwrap();
-        }
-
-        self.get_mut().unwrap()
-    }
-
-    /// Returns a mutable reference to a component, inserting the default value
-    /// if the entity doesn't have it.
-    pub fn get_or_default<C: Component + Default>(&mut self) -> &'w mut C {
-        self.get_or_insert_with(Default::default)
-    }
-
-    /// Insert a new component into this entity. Returns the previous value (if
-    /// present).
+    /// Inserts a component into this entity.
+    ///
+    /// Returns the previous value if there was one.
     pub fn insert<C: Component>(&mut self, component: C) -> Option<C> {
-        if unsafe { self.inner.table() }.header().contains::<C>() {
-            // replacing old value
+        let world = self.world_mut();
+        let info = world.components.register::<C>();
 
-            let table = unsafe { self.inner.table_mut() };
+        let old_addr =
+            unsafe { world.entities.get(self.id).unwrap_unchecked() };
 
-            table.replace(self.inner.entity, component)
-        } else {
-            // inserting new value
+        // SAFETY: this entity is alive, so the address is valid
+        if unsafe {
+            world
+                .components
+                .get_unchecked(old_addr.table)
+                .components()
+                .contains(info)
+        } {
+            // replace
 
-            // SAFETY: the entity is alive and the world pointer is valid for
-            // writes
             unsafe {
-                C::on_insert(self.as_mut());
+                let old_table =
+                    world.components.get_unchecked_mut(old_addr.table);
 
-                let old_table = self.inner.table_id();
-                let new_table = {
-                    let components = self.inner.world.components_mut();
+                Some(old_table.replace(old_addr.row, info.index(), component))
+            }
+        } else {
+            // insert new
 
-                    components
-                        .realloc_with(
-                            self.inner.entity,
-                            old_table,
-                            TypeData::of::<C>(),
-                            true,
-                            |table| {
-                                table.write(self.inner.entity, component);
-                            },
-                        )
-                        // SAFETY: the table is guaranteed to contain self.inner
-                        // entity
-                        .unwrap_unchecked()
-                };
+            unsafe {
+                let new_components = world
+                    .components
+                    .get_unchecked(old_addr.table)
+                    .components()
+                    .clone()
+                    .and_insert(info);
+                let new_addr =
+                    world.components.realloc(self.id, old_addr, new_components);
 
-                self.inner
-                    .world
-                    .entities_mut()
-                    .set(self.inner.entity, new_table)
-            };
+                world.entities.set(self.id, new_addr);
+                world.components.get_unchecked_mut(new_addr.table).write(
+                    new_addr.row,
+                    info.index(),
+                    component,
+                );
+            }
+
+            C::after_insert(self.as_mut());
 
             None
         }
     }
 
-    /// Call [`EntityWorld::insert`] and return `self`.
-    pub fn and_insert<C: Component>(&mut self, component: C) -> &mut Self {
-        self.insert(component);
-
-        self
-    }
-
-    /// Remove a component from this entity.
+    /// Removes a component from this entity.
+    ///
+    /// Returns an error if this entity doesn't contain the component.
     pub fn remove<C: Component>(&mut self) -> Result<C, ComponentNotFound> {
-        let component = TypeData::of::<C>();
+        if self.contains::<C>() {
+            C::before_remove(self.as_mut());
 
-        unsafe { self.inner.table() }
-            .header()
-            .contains::<C>()
-            .then(|| unsafe {
-                C::on_remove(self.as_mut());
+            let world = self.world_mut();
+            let info = world.components.register::<C>();
 
-                let old_table = self.inner.table_id();
-                let new_table = {
-                    let components = self.inner.world.components_mut();
-
-                    components
-                        .realloc_without(
-                            self.inner.entity,
-                            old_table,
-                            component,
-                            false,
-                        )
-                        // SAFETY: the table is guaranteed to contain self
-                        // entity
-                        .unwrap_unchecked()
+            let old_addr =
+            // SAFETY: this entity exists
+                unsafe { world.entities.get(self.id).unwrap_unchecked() };
+            let (prev, new_components) = {
+                let old_table =
+                    unsafe { world.components.get_unchecked(old_addr.table) };
+                // SAFETY: the component exists because of the above
+                // `.contains::<C>()`
+                let prev = unsafe {
+                    old_table
+                        .get_unchecked(old_addr.row, info.index())
+                        .as_ptr()
+                        .cast::<C>()
+                        .read()
                 };
+                let new_components =
+                    old_table.components().clone().and_remove(info);
 
-                self.inner
-                    .world
-                    .entities_mut()
-                    .set(self.inner.entity, new_table);
+                (prev, new_components)
+            };
+            // SAFETY: this entity exists in the table at `old_addr`
+            let new_addr = unsafe {
+                world.components.realloc(self.id, old_addr, new_components)
+            };
 
-                self.inner
-                    .world
-                    .components_mut()
-                    .table_mut(old_table)
-                    .unwrap_unchecked()
-                    .get_ptr_unchecked_mut(self.inner.entity, component)
-                    .cast::<C>()
-                    .read()
-            })
-            .ok_or(ComponentNotFound::new::<C>(self.inner.entity))
+            world.entities.set(self.id, new_addr);
+
+            Ok(prev)
+        } else {
+            Err(ComponentNotFound::new::<C>(self.id))
+        }
     }
 
-    /// Call [`EntityWorld::remove`] and return `self`.
-    pub fn and_remove<C: Component>(&mut self) -> &mut Self {
-        _ = self.remove::<C>();
+    /// Despawns this entity.
+    pub fn despawn(mut self) {
+        let world = self.world_mut();
+        let (addr, components) = unsafe {
+            // SAFETY: for this `EntityWorld` to exist, it must be a valid
+            // entity in the world
+            let addr = world.entities.get(self.id).unwrap_unchecked();
+            // SAFETY: the entity address exists, so it must refer to a valid
+            // table
+            let table = world.components.get_unchecked_mut(addr.table);
 
-        self
+            (addr, table.components().clone())
+        };
+
+        for component in &components {
+            let hook = component.before_remove();
+
+            hook(self.as_mut());
+        }
+
+        // SAFETY: same as above, the address is valid
+        let table = unsafe { world.components.get_unchecked_mut(addr.table) };
+
+        _ = world.entities.free(self.id);
+        // SAFETY: same as above, the entity exists
+        unsafe { table.free(addr.row) };
     }
 }
 
-impl<'w> Deref for EntityWorld<'w> {
-    type Target = EntityMut<'w>;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*ptr::from_ref(self).cast() }
+    #[derive(Component)]
+    struct A(u32);
+
+    #[derive(Component)]
+    struct B(u64);
+
+    #[test]
+    fn insert() {
+        let mut world = World::new();
+        let mut entity = world.spawn(A(123));
+
+        entity.insert(B(321));
+
+        assert_eq!(entity.get::<A>().unwrap().0, 123);
+        assert_eq!(entity.get::<B>().unwrap().0, 321);
     }
-}
 
-impl DerefMut for EntityWorld<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *ptr::from_mut(self).cast() }
+    #[test]
+    fn remove() {
+        let mut world = World::new();
+        let mut entity = world.spawn((A(123), B(321)));
+
+        entity.remove::<B>().unwrap();
+
+        assert_eq!(entity.get::<A>().unwrap().0, 123);
+        assert!(entity.get::<B>().is_err());
     }
 }

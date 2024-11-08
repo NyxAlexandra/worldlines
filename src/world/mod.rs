@@ -1,326 +1,74 @@
-use std::iter::Enumerate;
-use std::slice;
+//! Defines the [`World`], the center of an ECS.
 
-use thiserror::Error;
+use std::mem;
 
 pub use self::ptr::*;
-use crate::{
-    array,
-    Bundle,
-    BundleWriter,
-    Components,
+use crate::access::AccessError;
+use crate::commands::{Commands, EntityQueue};
+use crate::component::{Bundle, ComponentWriter, Components};
+use crate::entity::{
     Entities,
-    EntitiesIter,
-    EntitiesIterMut,
-    Entity,
-    EntityMut,
+    EntityId,
     EntityNotFound,
     EntityRef,
-    EntitySlot,
+    EntitySlots,
     EntityWorld,
-    Query,
-    QueryData,
-    QueryFilter,
-    ReadOnlyQueryData,
-    ReadOnlySystemInput,
-    Res,
-    ResMut,
-    Resource,
-    ResourceError,
-    Resources,
-    SystemInput,
-    WorldAccess,
-    WorldAccessError,
 };
+use crate::query::{Query, QueryData, ReadOnlyQueryData};
 
 mod ptr;
+#[cfg(test)]
+mod tests;
 
-/// The center of an ECS. Stores all entities, their components, and resources.
+/// Stores all ECS data.
+///
+/// - [Entity methods](#entity-methods)
 #[derive(Debug)]
 pub struct World {
     pub(crate) entities: Entities,
     pub(crate) components: Components,
-    pub(crate) resources: Resources,
+    /// Storage for internally-buffered commands.
+    pub(crate) commands: Commands,
 }
 
-/// An iterator over entities created in [`World::spawn_iter`].
+/// An iterator over all entities in a [`World`].
+#[derive(Clone)]
+pub struct EntitiesIter<'w> {
+    inner: EntitySlots<'w>,
+}
+
+/// An iterator over entities created by [`World::spawn_iter`].
 #[derive(Clone)]
 pub struct SpawnIter<'w> {
-    inner: Enumerate<slice::Iter<'w, EntitySlot>>,
+    inner: EntitySlots<'w>,
 }
 
 impl World {
-    /// Create a new empty world.
+    /// Creates a new empty world.
     pub fn new() -> Self {
         let entities = Entities::new();
         let components = Components::new();
-        let resources = Resources::new();
+        let commands = Commands::new();
 
-        Self { entities, components, resources }
+        Self { entities, components, commands }
     }
 
-    /// Borrow this world as a [`WorldPtr`].
-    ///
-    /// The pointer can be safely used for operations usable by `&World`.
+    /// Returns a pointer to this world.
     pub fn as_ptr(&self) -> WorldPtr<'_> {
         WorldPtr::from_ref(self)
     }
 
-    /// Mutably borrow this world as a [`WorldPtr`].
-    ///
-    /// The pointer can be safely used for operations usable by `&mut World`.
+    /// Returns a pointer to this world.
     pub fn as_ptr_mut(&mut self) -> WorldPtr<'_> {
         WorldPtr::from_mut(self)
     }
 
-    /// Despawn all entities and destroy all resources.
+    /// Removes all entities from the world.
     pub fn clear(&mut self) {
-        self.despawn_all();
-        self.destroy_all();
-    }
-
-    // entities ---
-
-    /// The amount of entities in this world.
-    pub fn len(&self) -> usize {
-        self.entities.len()
-    }
-
-    /// Returns `true` if there are no entities in this world.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Returns `true` if this world contains the entity.
-    pub fn contains(&self, entity: Entity) -> bool {
-        self.entities.contains(entity)
-    }
-
-    /// Borrow an entity.
-    pub fn entity(
-        &self,
-        entity: Entity,
-    ) -> Result<EntityRef<'_>, EntityNotFound> {
-        EntityRef::new(self, entity)
-    }
-
-    /// Mutably borrow an entity.
-    pub fn entity_mut(
-        &mut self,
-        entity: Entity,
-    ) -> Result<EntityMut<'_>, EntityNotFound> {
-        EntityMut::new(self, entity)
-    }
-
-    /// Mutably borrow an entity and the world.
-    pub fn entity_world(
-        &mut self,
-        entity: Entity,
-    ) -> Result<EntityWorld<'_>, EntityNotFound> {
-        EntityWorld::new(self, entity)
-    }
-
-    /// Mutably borrow multiple entities in a scope.
-    pub fn entity_scope<const N: usize>(
-        &mut self,
-        entities: [Entity; N],
-        f: impl FnOnce([EntityMut<'_>; N]),
-    ) -> Result<(), EntityScopeError> {
-        for (i, entity) in entities.iter().enumerate() {
-            let Some(slice) = entities.get((i + 1)..) else {
-                continue;
-            };
-
-            if slice.contains(entity) {
-                return Err(EntityScopeError::EntityAliasing(*entity));
-            }
-        }
-
-        let ptr = self.as_ptr_mut();
-
-        f(array::try_map(entities, |entity| unsafe {
-            EntityMut::new(ptr.as_mut(), entity)
-        })
-        .map_err(|EntityNotFound(entity)| {
-            EntityScopeError::EntityNotFound(entity)
-        })?);
-
-        Ok(())
-    }
-
-    /// Return an iterator that borrows each entity in this world.
-    pub fn entities(&self) -> EntitiesIter<'_> {
-        EntitiesIter { world: self, ids: self.entities.iter() }
-    }
-
-    /// Return an iterator that mutably borrows each entity in this world.
-    pub fn entities_mut(&mut self) -> EntitiesIterMut<'_> {
-        EntitiesIterMut { world: self.as_ptr(), ids: self.entities.iter() }
-    }
-
-    /// Return a read-only [`Query`] of the entities of this world.
-    pub fn query<D, F>(&self) -> Result<Query<'_, D, F>, WorldAccessError>
-    where
-        D: ReadOnlyQueryData,
-        F: QueryFilter,
-    {
-        // SAFETY: the data is read-only
-        unsafe { Query::new(self.as_ptr()) }
-    }
-
-    /// Return a [`Query`] of the entities of this world.
-    pub fn query_mut<D, F>(
-        &mut self,
-    ) -> Result<Query<'_, D, F>, WorldAccessError>
-    where
-        D: QueryData,
-        F: QueryFilter,
-    {
-        unsafe { Query::new(self.as_ptr_mut()) }
-    }
-
-    /// Spawn a new entity with a [`Bundle`] its components. Returns an
-    /// [`EntityWorld`] which can be used to further mutate the entity.
-    pub fn spawn<B: Bundle>(&mut self, bundle: B) -> EntityWorld<'_> {
-        let entity = self.entities.alloc();
-
-        unsafe {
-            let table = self.components.alloc::<B>(entity);
-
-            self.entities.set(entity, table);
-
-            let mut writer =
-                BundleWriter::new(self.as_ptr_mut().entity(entity));
-
-            bundle.take(&mut writer);
-        }
-
-        // SAFETY: the entity is alive
-        unsafe { EntityWorld::new(self, entity).unwrap_unchecked() }
-    }
-
-    /// Spawn entities in bulk.
-    pub fn spawn_iter<B: Bundle>(
-        &mut self,
-        iter: impl IntoIterator<Item = B>,
-    ) -> SpawnIter<'_> {
-        self.entities.flush();
-
-        let bundles = iter.into_iter();
-
-        let (lower, upper) = bundles.size_hint();
-        let count = upper.unwrap_or(lower);
-
-        let table = self.components.reserve::<B>(count);
-
-        let mut allocated = self.entities.alloc_many(count);
-        let start = allocated.start;
-
-        for bundle in bundles {
-            let index = allocated.next().unwrap_or_else(|| {
-                let index = allocated.end;
-
-                allocated.end += 1;
-                self.entities.alloc_end();
-
-                index
-            });
-            let entity = unsafe {
-                Entity {
-                    index: index as _,
-                    version: self
-                        .entities
-                        .slot(index)
-                        .unwrap_unchecked()
-                        .version,
-                }
-            };
-
-            self.entities.set(entity, table);
-
-            let mut writer =
-                BundleWriter::new(self.as_ptr_mut().entity(entity));
-
-            bundle.take(&mut writer);
-        }
-
-        SpawnIter {
-            inner: unsafe {
-                self.entities
-                    .slot(start..allocated.end)
-                    .unwrap_unchecked()
-                    .iter()
-                    .enumerate()
-            },
-        }
-    }
-
-    /// Despawn an entity.
-    pub fn despawn(&mut self, entity: Entity) -> Result<(), EntityNotFound> {
-        let table = self.entities.free(entity).ok_or(EntityNotFound(entity))?;
-
-        // SAFETY: the table id is guaranteed to be correct
-        self.components.free(entity, table).ok_or_else(|| unreachable!())
-    }
-
-    /// Despawn all entities.
-    pub fn despawn_all(&mut self) {
         self.entities.clear();
         self.components.clear();
     }
-
-    // resources ---
-
-    /// Returns `true` if this world contains the resource.
-    #[doc(alias = "contains_resource")]
-    pub fn has<R: Resource>(&self) -> bool {
-        self.resources.contains::<R>()
-    }
-
-    /// Borrow a resource.
-    pub fn resource<R: Resource>(&self) -> Result<Res<'_, R>, ResourceError> {
-        self.resources.get()
-    }
-
-    /// Mutably borrow a resource.
-    pub fn resource_mut<R: Resource>(
-        &self,
-    ) -> Result<ResMut<'_, R>, ResourceError> {
-        self.resources.get_mut()
-    }
-
-    /// Create a new resource.
-    #[doc(alias = "insert_resource")]
-    pub fn create<R: Resource>(&mut self, resource: R) {
-        self.resources.insert(resource);
-    }
-
-    /// Remove a resource.
-    #[doc(alias = "remove_resource")]
-    pub fn destroy<R: Resource>(&mut self) -> Result<R, ResourceError> {
-        self.resources.remove()
-    }
-
-    /// Remove all resources.
-    #[doc(alias = "clear_resources")]
-    pub fn destroy_all(&mut self) {
-        self.resources.clear();
-    }
 }
-
-/// Error when calling [`World::entity_scope`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum EntityScopeError {
-    #[error("entity {0:?} passed to `World::entity_scope` multiple times")]
-    EntityAliasing(Entity),
-    #[error("entity {0:?} not found")]
-    EntityNotFound(Entity),
-}
-
-// SAFETY: all resources and components are `Send + Sync`
-unsafe impl Send for World {}
-// SAFETY: all resources and components are `Send + Sync`
-unsafe impl Sync for World {}
 
 impl Default for World {
     fn default() -> Self {
@@ -328,52 +76,195 @@ impl Default for World {
     }
 }
 
-unsafe impl SystemInput for &World {
-    type Output<'w, 's> = &'w World;
-    type State = ();
-
-    fn access(access: &mut WorldAccess) {
-        access.world();
+/// # Entity methods
+///
+/// Methods for creating and managing entities.
+impl World {
+    /// Returns the count of live entities in this world.
+    pub fn len(&self) -> usize {
+        self.entities.len()
     }
 
-    fn init(_world: &World) -> Self::State {}
+    /// Returns `true` if this world contains no entities.
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
 
-    unsafe fn get<'w, 's>(
-        world: WorldPtr<'w>,
-        _state: &'s mut Self::State,
-    ) -> Self::Output<'w, 's> {
-        unsafe { world.as_ref() }
+    /// Returns `true` if this world contains this entity.
+    pub fn contains(&self, entity: EntityId) -> bool {
+        self.entities.contains(entity)
+    }
+
+    /// Returns an iterator over the entities in this world.
+    pub fn iter(&self) -> EntitiesIter<'_> {
+        EntitiesIter { inner: self.entities.iter() }
+    }
+
+    /// Borrows an entity in this world.
+    ///
+    /// Returns an error if the entity doesn't exist in this world.
+    pub fn entity(
+        &self,
+        entity: EntityId,
+    ) -> Result<EntityRef<'_>, EntityNotFound> {
+        EntityRef::new(entity, self)
+    }
+
+    /// Mutably borrows an entity and this world.
+    ///
+    /// Returns an error if the entity doesn't exist in this world.
+    pub fn entity_mut(
+        &mut self,
+        entity: EntityId,
+    ) -> Result<EntityWorld<'_>, EntityNotFound> {
+        EntityWorld::new(entity, self)
+    }
+
+    /// Returns a query of data from this world.
+    ///
+    /// Returns an error if the query access is invalid.
+    ///
+    /// The query data must implement [`ReadOnlyQueryData`].
+    pub fn query<D: ReadOnlyQueryData>(
+        &self,
+    ) -> Result<Query<'_, D>, AccessError> {
+        Query::from_ref(self)
+    }
+
+    /// Returns a mutable query of data from this world.
+    ///
+    /// Returns an error if the query access is invalid.
+    pub fn query_mut<D: QueryData>(
+        &mut self,
+    ) -> Result<Query<'_, D>, AccessError> {
+        Query::from_mut(self)
+    }
+
+    /// Spawns a new entity with its components.
+    ///
+    /// Returns an [`EntityWorld`] to allow editing of the produced entity.
+    pub fn spawn(&mut self, bundle: impl Bundle) -> EntityWorld<'_> {
+        let entity = self.entities.alloc();
+
+        unsafe { self.spawn_at(entity, bundle) }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn spawn_at(
+        &mut self,
+        entity: EntityId,
+        bundle: impl Bundle,
+    ) -> EntityWorld<'_> {
+        #[track_caller]
+        #[inline(always)]
+        unsafe fn spawn_at_inner<B: Bundle>(
+            world: &mut World,
+            entity: EntityId,
+            bundle: B,
+        ) -> EntityWorld<'_> {
+            {
+                let queue = EntityQueue::new(entity, &mut world.commands);
+                let addr = world.components.alloc::<B>(1);
+
+                world.entities.set(entity, addr);
+                // SAFETY: the index is valid as it was just allocated and the
+                // table doesn't contain this entity because it was
+                // only allocated above
+                unsafe {
+                    world.components.get_unchecked_mut(addr.table).push(entity)
+                };
+                bundle.write(&mut ComponentWriter::new(
+                    queue,
+                    &mut world.components,
+                    addr,
+                ));
+            }
+
+            world.flush();
+
+            // SAFETY: the entity was allocated above, so it must exist
+            unsafe { EntityWorld::new_unchecked(entity, world) }
+        }
+
+        unsafe { spawn_at_inner(self, entity, bundle) }
+    }
+
+    /// Spawns an entity for each bundle in an iterator.
+    ///
+    /// More efficient than calling [`World::spawn`] on each bundle.
+    pub fn spawn_iter<B: Bundle>(
+        &mut self,
+        bundles: impl IntoIterator<Item = B>,
+    ) -> SpawnIter<'_> {
+        self.entities.flush();
+
+        let bundles = bundles.into_iter();
+
+        let (lower, upper) = bundles.size_hint();
+        let count = upper.unwrap_or(lower);
+
+        let first_index = self.entities.len();
+        // allocates enough space to hold the last entity
+        let addr = self.components.alloc::<B>((first_index + count) as _);
+        let mut allocated = self.entities.alloc_many(count);
+
+        for bundle in bundles {
+            let entity = allocated
+                .next()
+                .map(|index| index as _)
+                .map(EntityId::from_index)
+                .unwrap_or_else(|| self.entities.alloc_end());
+
+            self.entities.set(entity, addr);
+            bundle.write(&mut ComponentWriter::new(
+                EntityQueue::new(entity, &mut self.commands),
+                &mut self.components,
+                addr,
+            ));
+        }
+
+        self.flush();
+
+        SpawnIter { inner: self.entities.iter_slice(first_index..) }
+    }
+
+    /// Despawns an entity.
+    ///
+    /// Returns an error if the entity doesn't exist in the world.
+    pub fn despawn(&mut self, entity: EntityId) -> Result<(), EntityNotFound> {
+        self.entity_mut(entity).map(EntityWorld::despawn)
+    }
+
+    /// Ensures all entities are allocated and applies all buffered commands.
+    pub(crate) fn flush(&mut self) {
+        self.entities.flush();
+
+        let mut commands = mem::replace(&mut self.commands, Commands::new());
+
+        commands.apply(self);
+        self.commands = commands;
     }
 }
 
-unsafe impl ReadOnlySystemInput for &World {}
-
-unsafe impl SystemInput for &mut World {
-    type Output<'w, 's> = &'w mut World;
-    type State = ();
-
-    fn access(access: &mut WorldAccess) {
-        access.world_mut();
-    }
-
-    fn init(_world: &World) -> Self::State {}
-
-    unsafe fn get<'w, 's>(
-        world: WorldPtr<'w>,
-        _state: &'s mut Self::State,
-    ) -> Self::Output<'w, 's> {
-        unsafe { world.as_mut() }
-    }
-}
-
-impl Iterator for SpawnIter<'_> {
-    type Item = Entity;
+impl Iterator for EntitiesIter<'_> {
+    type Item = EntityId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(index, slot)| Entity {
-            index: index as _,
-            version: slot.version,
-        })
+        self.inner.next().map(|(entity, _)| entity)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl ExactSizeIterator for EntitiesIter<'_> {}
+
+impl Iterator for SpawnIter<'_> {
+    type Item = EntityId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|(entity, _)| entity)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -382,129 +273,3 @@ impl Iterator for SpawnIter<'_> {
 }
 
 impl ExactSizeIterator for SpawnIter<'_> {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Component;
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn spawn_many() {
-        #[derive(Component)]
-        struct A(#[expect(unused)] u32);
-
-        #[derive(Component)]
-        struct B(#[expect(unused)] u64);
-
-        let mut world = World::new();
-
-        for _ in 0..1000 {
-            world.spawn((A(123), B(321)));
-        }
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn spawn_big_iter() {
-        #[derive(Component)]
-        struct A(#[expect(unused)] u32);
-
-        #[derive(Component)]
-        struct B(#[expect(unused)] u64);
-
-        let mut world = World::new();
-
-        world.spawn_iter((0..10000).map(|_| (A(123), B(321))));
-    }
-
-    #[test]
-    fn entity_scope() {
-        let mut world = World::new();
-
-        let e0 = world.spawn(()).id();
-        let e1 = world.spawn(()).id();
-        let e2 = world.spawn(()).id();
-
-        println!("{:#?}", world);
-
-        world.entity_scope([e0, e1, e2], |_| {}).unwrap();
-
-        assert_eq!(
-            world.entity_scope([e0, e1, e0], |_| {}),
-            Err(EntityScopeError::EntityAliasing(e0)),
-        );
-
-        let despawned = world.spawn(()).id();
-
-        world.despawn(despawned).unwrap();
-
-        assert_eq!(
-            world.entity_scope([despawned], |_| {}),
-            Err(EntityScopeError::EntityNotFound(despawned)),
-        );
-
-        assert_eq!(
-            world.entity_scope([despawned, e0, e0], |_| {}),
-            Err(EntityScopeError::EntityAliasing(e0)),
-            "aliasing should be checked before liveness",
-        );
-    }
-
-    #[test]
-    fn spawn_iter() {
-        #[derive(Component, Debug, PartialEq)]
-        struct Name(&'static str);
-
-        #[derive(Component, Debug, PartialEq)]
-        struct Age(u32);
-
-        let mut world = World::new();
-
-        world.spawn_iter([
-            (Name("e0"), Age(0)),
-            (Name("e1"), Age(1)),
-            (Name("e2"), Age(2)),
-        ]);
-
-        println!("{:#?}", world);
-
-        let mut iter = world.query::<(&Name, &Age), ()>().unwrap();
-
-        assert_eq!(iter.next(), Some((&Name("e0"), &Age(0))));
-        assert_eq!(iter.next(), Some((&Name("e1"), &Age(1))));
-        assert_eq!(iter.next(), Some((&Name("e2"), &Age(2))));
-        assert!(iter.next().is_none());
-    }
-
-    #[test]
-    fn query_mut() {
-        #[derive(Component)]
-        struct Human;
-
-        #[derive(Component)]
-        struct Goblin;
-
-        #[derive(Component)]
-        struct Hp(u32);
-
-        #[derive(Component)]
-        struct Poisoned(u32);
-
-        let mut world = World::new();
-
-        let healthy = world.spawn((Human, Hp(10))).id();
-        let poisoned = world.spawn((Human, Hp(15), Poisoned(3))).id();
-        let goblin = world.spawn((Goblin, Hp(5), Poisoned(1))).id();
-
-        for (Hp(ref mut hp), Poisoned(dmg)) in
-            world.query_mut::<(&mut Hp, &Poisoned), ()>().unwrap()
-        {
-            *hp -= dmg;
-        }
-
-        assert_eq!(world.entity(healthy).unwrap().get::<Hp>().unwrap().0, 10);
-        assert_eq!(world.entity(poisoned).unwrap().get::<Hp>().unwrap().0, 12);
-        assert_eq!(world.entity(goblin).unwrap().get::<Hp>().unwrap().0, 4);
-    }
-}

@@ -1,7 +1,9 @@
+use std::hint::black_box;
 use std::time::Duration;
 
-use archetypal_ecs::{Component, World};
 use criterion::{criterion_group, criterion_main, Criterion};
+use worldlines::component::Component;
+use worldlines::world::World;
 
 #[derive(Component)]
 struct A(#[expect(unused)] u32);
@@ -14,7 +16,7 @@ fn benchmark(c: &mut Criterion) {
         bencher.iter(|| {
             let mut world = World::new();
 
-            world.spawn_iter((0..10000).map(|_| (A(123), B(321))));
+            world.spawn_iter((0..10000).map(|_| black_box((A(123), B(321)))));
         })
     });
 }

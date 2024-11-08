@@ -1,344 +1,521 @@
+//! Queries of components in a world.
+
+use std::any::type_name;
 use std::marker::PhantomData;
 
-pub use self::any_of::*;
-pub use self::contains::*;
-pub use self::not::*;
-pub use self::or::*;
-use crate::{
-    EntityIterIds,
-    EntityPtr,
-    EntityRef,
-    ReadOnlySystemInput,
-    SystemInput,
-    World,
-    WorldAccess,
-    WorldAccessError,
-    WorldPtr,
-};
+use thiserror::Error;
 
-mod any_of;
-mod contains;
-mod not;
-mod or;
+use crate::access::{AccessError, Level, WorldAccess, WorldAccessBuilder};
+use crate::entity::{EntityAddr, EntityId, EntityMut, EntityPtr, EntityRef};
+use crate::prelude::{Component, TableIndex};
+use crate::storage::{SparseIter, SparseSet, TableRow};
+use crate::system::{ReadOnlySystemInput, SystemInput};
+use crate::world::{World, WorldPtr};
 
-/// A query of data in a [`World`](crate::World).
-pub struct Query<'w, D, F = ()>
-where
-    D: QueryData,
-    F: QueryFilter,
-{
+mod tuple_impl;
+
+/// A query of components of a world.
+pub struct Query<'w, D: QueryData> {
     world: WorldPtr<'w>,
-    entities: EntityIterIds<'w>,
-    _marker: PhantomData<(D, F)>,
+    /// Tables that this query matches.
+    tables: SparseSet<TableIndex>,
+    _marker: PhantomData<D>,
 }
 
-/// The data that is retreived in a [`Query`].
+/// An iterator over data of a query.
+pub struct QueryIter<'w, 's, D: QueryData> {
+    world: WorldPtr<'w>,
+    tables: SparseIter<'s, TableIndex>,
+    /// The amount of matched entities left.
+    len: usize,
+    /// The current table.
+    table: Option<TableIndex>,
+    /// The current row in the table.
+    row: TableRow,
+    _marker: PhantomData<D>,
+}
+
+/// Trait for the data that can be retreived from an entity.
 ///
 /// # Safety
 ///
-/// [`QueryData::access`] must accurately set what this query data accesses.
+/// [`QueryData::get`] must only access data set in [`QueryData::access`].
 pub unsafe trait QueryData {
-    /// The output of this query input.
+    /// The type of the output data.
     type Output<'w>;
 
-    /// Set what this query accesses.
+    /// Adds the access of this query data to the set.
     ///
-    /// Used to make sure that queries are safely constructed.
-    fn access(access: &mut WorldAccess);
+    /// Used to ensure that the query accesses the world safely and correctly.
+    fn access(builder: &mut WorldAccessBuilder<'_>);
 
-    /// Fetch the query item.
+    /// Returns the query output for an entity.
     ///
     /// # Safety
     ///
-    /// The provided pointer must be valid for the access described in
-    /// [`QueryData::access`].
-    unsafe fn fetch(entity: EntityPtr<'_>) -> Option<Self::Output<'_>>;
+    /// The access of this query data must have been validated. The entity
+    /// pointer must be valid for the described access. All components
+    /// that are required by [`QueryData::access`] must be present in the
+    /// entity.
+    unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_>;
 }
 
-/// Trait for [`QueryData`] that can be fetched from an immutable reference.
+/// Trait for query data that doesn't need mutable access to components.
 ///
-/// ## Implementation Safety
+/// # Safety
 ///
-/// Must not mutably access data. This also means that [`QueryData::access`]
-/// must only declare immutable access.
+/// The query data implementation must declare only read access and must never
+/// mutate entities.
 pub unsafe trait ReadOnlyQueryData: QueryData {}
 
-/// Additional filters to place on a [`Query`].
-pub trait QueryFilter {
-    /// Returns `true` if the entity should be included in the [`Query`].
-    fn include(entity: EntityRef<'_>) -> bool;
+// TODO: consider collapsing `EntityNotFound` into `Mismatch`
+
+/// Error when accessing queried data.
+#[derive(Debug, Clone, Copy, Error)]
+pub enum QueryGetError {
+    /// Error when the entity doesn't exist in the world.
+    #[error("entity not found: {0:?}")]
+    EntityNotFound(EntityId),
+    /// Error when the entity exists but doesn't match the query.
+    #[error("entity {entity:?} does not match the query {data}")]
+    Mismatch {
+        entity: EntityId,
+        /// The type name of the query data.
+        data: &'static str,
+    },
 }
 
-/// A set of [`QueryFilter`]s.
-pub trait QueryFilterSet: QueryFilter {
-    /// Return the function pointers of each filter in this set.
-    fn filters() -> impl Iterator<Item = fn(EntityRef<'_>) -> bool>;
-}
-
-impl<'w, D, F> Query<'w, D, F>
-where
-    D: QueryData,
-    F: QueryFilter,
-{
-    /// ## Safety
+impl<'w, D: QueryData> Query<'w, D> {
+    /// Creates a new query.
     ///
-    /// The pointer must be valid for the access of the query.
-    pub(crate) unsafe fn new(
-        world: WorldPtr<'w>,
-    ) -> Result<Self, WorldAccessError> {
-        let mut access = WorldAccess::new();
+    /// Returns an error if the query access is invalid.
+    ///
+    /// # Safety
+    ///
+    /// The world pointer must be valid for this query's access.
+    pub unsafe fn new(world: WorldPtr<'w>) -> Result<Self, AccessError> {
+        // SAFETY: access to world metadata is always valid
+        let mut builder = WorldAccess::builder(unsafe { world.as_ref() });
 
-        D::access(&mut access);
+        D::access(&mut builder);
 
-        if let Some(error) = access.error() {
-            Err(error)
-        } else {
-            Ok(Self {
-                world,
-                entities: unsafe { world.entities().iter() },
-                _marker: PhantomData,
+        let access = builder.build();
+
+        access.result().map(|_| {
+            // TODO: optimize
+
+            let mut tables = SparseSet::new();
+
+            // SAFETY: access to world metadata is always valid
+            for (index, table) in unsafe { world.as_ref().components.tables() }
+            {
+                if access.matches(table.components()) {
+                    tables.insert(index);
+                }
+            }
+
+            Self { world, tables, _marker: PhantomData }
+        })
+    }
+
+    /// Creates a new query from a world reference.
+    ///
+    /// Returns an error if the query access is invalid.
+    ///
+    /// The query data must implement [`ReadOnlyQueryData`].
+    pub fn from_ref(world: &'w World) -> Result<Self, AccessError>
+    where
+        D: ReadOnlyQueryData,
+    {
+        // SAFETY: the world must be valid as it's a reference
+        unsafe { Self::new(world.as_ptr()) }
+    }
+
+    /// Creates a new query from a mutable world reference.
+    ///
+    /// Returns an error if the query access is invalid.
+    pub fn from_mut(world: &'w mut World) -> Result<Self, AccessError> {
+        // SAFETY: the world must be valid as it's a reference
+        unsafe { Self::new(world.as_ptr_mut()) }
+    }
+
+    /// Returns the amount of entities matched by this query.
+    pub fn len(&self) -> usize {
+        self.tables
+            .iter()
+            .copied()
+            // SAFETY: reads to ECS metadata should always be valid
+            .map(|table| unsafe {
+                self.world.as_ref().components.get_unchecked(table).len()
             })
+            .sum()
+    }
+
+    /// Returns `true` if this query matched no entities.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns `true` if this query matches the entity.
+    pub fn contains(&self, entity: EntityId) -> bool {
+        let Some(addr) = (unsafe { self.world.as_ref().entities.get(entity) })
+        else {
+            return false;
+        };
+
+        self.tables.contains(&addr.table)
+    }
+
+    /// Gets the query data for a particular entity.
+    ///
+    /// The query data must implement [`ReadOnlyQueryData`].
+    pub fn get(&self, entity: EntityId) -> Result<D::Output<'_>, QueryGetError>
+    where
+        D: ReadOnlyQueryData,
+    {
+        let addr = self
+            .addr_of(entity)
+            .ok_or(QueryGetError::EntityNotFound(entity))?;
+
+        if self.tables.contains(&addr.table) {
+            // SAFETY: the entity matches the query
+            Ok(unsafe { D::get(self.world.entity(entity)) })
+        } else {
+            Err(QueryGetError::Mismatch { entity, data: type_name::<D>() })
+        }
+    }
+
+    /// Gets the query data for a particular entity.
+    pub fn get_mut(
+        &mut self,
+        entity: EntityId,
+    ) -> Result<D::Output<'_>, QueryGetError> {
+        let addr = self
+            .addr_of(entity)
+            .ok_or(QueryGetError::EntityNotFound(entity))?;
+
+        if self.tables.contains(&addr.table) {
+            // SAFETY: the entity matches the query
+            Ok(unsafe { D::get(self.world.entity(entity)) })
+        } else {
+            Err(QueryGetError::Mismatch { entity, data: type_name::<D>() })
+        }
+    }
+
+    fn addr_of(&self, entity: EntityId) -> Option<EntityAddr> {
+        unsafe { self.world.as_ref().entities.get(entity) }
+    }
+
+    /// Returns an iterator over query data.
+    ///
+    /// The query data must implement [`ReadOnlyQueryData`].
+    pub fn iter(&self) -> QueryIter<'w, '_, D>
+    where
+        D: ReadOnlyQueryData,
+    {
+        QueryIter {
+            world: self.world,
+            len: self.len(),
+            tables: self.tables.iter(),
+            table: None,
+            row: TableRow(0),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns an iterator over query data.
+    pub fn iter_mut(&mut self) -> QueryIter<'w, '_, D> {
+        QueryIter {
+            world: self.world,
+            tables: self.tables.iter(),
+            len: self.len(),
+            table: None,
+            row: TableRow(0),
+            _marker: PhantomData,
         }
     }
 }
 
-unsafe impl<D, F> SystemInput for Query<'_, D, F>
-where
-    D: QueryData,
-    F: QueryFilter,
-{
-    type Output<'w, 's> = Query<'w, D, F>;
+/// # Safety
+///
+/// The query only accesses the world as its data does, which implementors
+/// ensure perform only valid access.
+unsafe impl<D: QueryData> SystemInput for Query<'_, D> {
+    type Output<'w, 's> = Query<'w, D>;
+    // TODO: cache matched tables
     type State = ();
-
-    fn access(access: &mut WorldAccess) {
-        D::access(access);
-    }
 
     fn init(_world: &World) -> Self::State {}
 
+    fn access(_state: &Self::State, builder: &mut WorldAccessBuilder<'_>) {
+        D::access(builder);
+    }
+
     unsafe fn get<'w, 's>(
-        world: WorldPtr<'w>,
         _state: &'s mut Self::State,
+        world: WorldPtr<'w>,
     ) -> Self::Output<'w, 's> {
-        // SAFETY: caller must ensure that the access did not alias and the
-        // pointer is valid for the query's access
+        // SAFETY: the caller ensures that the access is valid
         unsafe { Query::new(world).unwrap_unchecked() }
     }
 }
 
-unsafe impl<D, F> ReadOnlySystemInput for Query<'_, D, F>
-where
-    D: ReadOnlyQueryData,
-    F: QueryFilter,
-{
+/// # Safety
+///
+/// The query only accesses the world as its data does, which implementors
+/// ensure perform only read-only access.
+unsafe impl<D: ReadOnlyQueryData> ReadOnlySystemInput for Query<'_, D> {}
+
+impl<'w, 's, D: ReadOnlyQueryData> IntoIterator for &'s Query<'w, D> {
+    type IntoIter = QueryIter<'w, 's, D>;
+    type Item = D::Output<'w>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
-impl<'w, D, F> Iterator for Query<'w, D, F>
-where
-    D: QueryData,
-    F: QueryFilter,
-{
+impl<'w, 's, D: QueryData> IntoIterator for &'s mut Query<'w, D> {
+    type IntoIter = QueryIter<'w, 's, D>;
+    type Item = D::Output<'w>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+impl<'w, 's, D: QueryData> Iterator for QueryIter<'w, 's, D> {
     type Item = D::Output<'w>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let entity = self.world.entity(self.entities.next()?);
+        if self.len == 0 {
+            return None;
+        }
 
-        F::include(unsafe { entity.as_ref() })
-            .then(|| unsafe { D::fetch(entity) })
-            .flatten()
-            .or_else(|| self.next())
+        let table = if let Some(table) = self.table {
+            table
+        } else {
+            *self.table.get_or_insert(*self.tables.next()?)
+        };
+        let entity = unsafe {
+            let table = self.world.as_ref().components.get_unchecked(table);
+
+            table.entity(self.row).or_else(|| table.entities().next().copied())
+        };
+
+        if let Some(entity) = entity {
+            self.len -= 1;
+
+            Some(unsafe { D::get(self.world.entity(entity)) })
+        } else if entity.is_none() && self.tables.len() != 0 {
+            self.table = None;
+            self.row = TableRow(0);
+
+            self.next()
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
     }
 }
 
-macro_rules! impl_query_data {
-    ($($t:ident),*) => {
-        impl_query_data!([] [$($t)*]);
-    };
+impl<'w, 's, D: QueryData> ExactSizeIterator for QueryIter<'w, 's, D> {}
 
-    ([$($t:ident)*] []) => {
-        unsafe impl<$($t: QueryData),*> QueryData for ($($t,)*) {
-            type Output<'w> = ($($t::Output<'w>,)*);
+/// # Safety
+///
+/// The access declares that it borrows `C`.
+unsafe impl<C: Component> QueryData for &C {
+    type Output<'w> = &'w C;
 
-            #[allow(unused_variables)]
-            fn access(access: &mut WorldAccess) {
-                $(
-                    $t::access(access);
-                )*
-            }
+    fn access(builder: &mut WorldAccessBuilder<'_>) {
+        builder.borrows_component::<C>(Level::Read);
+    }
 
-            #[allow(unused_variables)]
-            unsafe fn fetch(entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
-                Some(($(unsafe { $t::fetch(entity)? },)*))
-            }
-        }
-
-        unsafe impl<$($t),*> ReadOnlyQueryData for ($($t,)*)
-        where
-            $($t: ReadOnlyQueryData,)*
-        {
-        }
-    };
-
-    ([$($rest:ident)*]  [$head:ident $($tail:ident)*]) => {
-        impl_query_data!([$($rest)*] []);
-        impl_query_data!([$($rest)* $head] [$($tail)*]);
-    };
+    unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
+        // SAFETY: the caller ensures that the entity contains `C` and that the
+        // entity pointer is valid for reads to `C`
+        unsafe { entity.get_unchecked() }
+    }
 }
 
-impl_query_data!(D0, D1, D2, D3, D4, D5, D6, D7);
+/// # Safety
+///
+/// The access declares that it immutably borrows `C`.
+unsafe impl<C: Component> ReadOnlyQueryData for &C {}
 
-macro_rules! impl_query_filter {
-    ($($t:ident),*) => {
-        impl_query_filter!([] [$($t)*]);
-    };
+/// # Safety
+///
+/// The access declares that it mutable borrows `C`.
+unsafe impl<C: Component> QueryData for &mut C {
+    type Output<'w> = &'w mut C;
 
-    ([$($t:ident)*] []) => {
-        impl<$($t),*> QueryFilter for ($($t,)*)
-        where
-            $($t: QueryFilter,)*
-        {
-            #[allow(unused_variables)]
-            fn include(entity: EntityRef<'_>) -> bool {
-                true $(&& $t::include(entity))*
-            }
-        }
+    fn access(builder: &mut WorldAccessBuilder<'_>) {
+        builder.borrows_component::<C>(Level::Write);
+    }
 
-        impl<$($t),*> QueryFilterSet for ($($t,)*)
-        where
-            $($t: QueryFilter,)*
-        {
-            // compiler seems to be falsely emitting this warning
-            #[allow(refining_impl_trait)]
-            fn filters() -> impl Iterator<Item = fn(EntityRef<'_>) -> bool> {
-                [$($t::include as fn(EntityRef<'_>) -> bool),*].into_iter()
-            }
-        }
-    };
-
-    ([$($rest:ident)*]  [$head:ident $($tail:ident)*]) => {
-        impl_query_filter!([$($rest)*] []);
-        impl_query_filter!([$($rest)* $head] [$($tail)*]);
-    };
+    unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
+        // SAFETY: the caller ensures that the entity contains `C` and that the
+        // entity pointer is valid for reads/writes to `C`
+        unsafe { entity.get_unchecked_mut() }
+    }
 }
 
-impl_query_filter!(F0, F1, F2, F3, F4, F5, F6, F7);
+/// # Safety
+///
+/// The access declares that it immutably borrows `C`.
+unsafe impl<C: Component> QueryData for Option<&C> {
+    type Output<'w> = Option<&'w C>;
+
+    fn access(builder: &mut WorldAccessBuilder<'_>) {
+        builder.maybe_borrows_component::<C>(Level::Read);
+    }
+
+    unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
+        unsafe { entity.get().ok() }
+    }
+}
+
+/// # Safety
+///
+/// The access declares that it immutably borrows `C`.
+unsafe impl<C: Component> ReadOnlyQueryData for Option<&C> {}
+
+/// # Safety
+///
+/// The access declares that it mutably borrows `C`.
+unsafe impl<C: Component> QueryData for Option<&mut C> {
+    type Output<'w> = Option<&'w mut C>;
+
+    fn access(builder: &mut WorldAccessBuilder<'_>) {
+        builder.maybe_borrows_component::<C>(Level::Write);
+    }
+
+    unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
+        unsafe { entity.get_mut().ok() }
+    }
+}
+
+/// # Safety
+///
+/// Nothing is accessed.
+unsafe impl QueryData for EntityId {
+    type Output<'w> = Self;
+
+    fn access(_builder: &mut WorldAccessBuilder<'_>) {}
+
+    unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
+        entity.id()
+    }
+}
+
+/// # Safety
+///
+/// Nothing is accessed.
+unsafe impl ReadOnlyQueryData for EntityId {}
+
+/// # Safety
+///
+/// The access declares that it immutable borrows all components.
+unsafe impl QueryData for EntityRef<'_> {
+    type Output<'w> = EntityRef<'w>;
+
+    fn access(builder: &mut WorldAccessBuilder<'_>) {
+        builder.borrows_all_entities(Level::Read);
+    }
+
+    unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
+        unsafe { entity.as_ref() }
+    }
+}
+
+/// # Safety
+///
+/// The access declares that it immutably borrows all components.
+unsafe impl ReadOnlyQueryData for EntityRef<'_> {}
+
+/// # Safety
+///
+/// The access declares that it mutably borrows all components.
+unsafe impl QueryData for EntityMut<'_> {
+    type Output<'w> = EntityMut<'w>;
+
+    fn access(builder: &mut WorldAccessBuilder<'_>) {
+        builder.borrows_all_entities(Level::Read);
+    }
+
+    unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
+        unsafe { entity.as_mut() }
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{Component, Entity, EntityMut, World};
+    use crate::prelude::*;
 
     #[derive(Component)]
-    struct A;
+    struct Human;
 
     #[derive(Component)]
-    struct B;
+    struct LaCreatura;
 
-    fn _assert_impls<C: Component, F: QueryFilter>() {
-        fn assert_query_data<D: QueryData>() {}
-        fn assert_query_filter<F: QueryFilter>() {}
+    #[derive(Component)]
+    struct Caterpillar;
 
-        assert_query_data::<()>();
-        assert_query_data::<&C>();
-        assert_query_data::<&mut C>();
-        assert_query_data::<(&C, &C)>();
-        assert_query_data::<(&C, &C, &mut C)>();
-        assert_query_data::<(&mut C, &mut C, &mut C)>();
-        assert_query_data::<(Entity, EntityRef, EntityMut)>();
+    #[derive(Component)]
+    struct Butterfly;
 
-        assert_query_filter::<()>();
-        assert_query_filter::<F>();
-        assert_query_filter::<(F, F)>();
-        assert_query_filter::<(F, F, F)>();
+    #[derive(Component)]
+    struct Hp(usize);
+
+    #[test]
+    fn query_iter() {
+        let mut world = World::new();
+
+        let human = world.spawn((Human, Hp(24))).id();
+        let la_creatura = world.spawn((LaCreatura, Hp(128))).id();
+        let butterfly = {
+            let mut caterpillar = world.spawn((Caterpillar, Hp(1)));
+
+            caterpillar.remove::<Caterpillar>().unwrap();
+            caterpillar.insert(Butterfly);
+            caterpillar.insert(Hp(3));
+
+            caterpillar.id()
+        };
+
+        let query = world.query::<(EntityId, &Hp)>().unwrap();
+
+        assert_eq!(query.len(), 3);
+
+        for (entity, _) in &query {
+            assert!([human, la_creatura, butterfly].contains(&entity));
+        }
     }
 
     #[test]
-    fn query_no_filter() {
-        #[derive(Component)]
-        struct Name(#[expect(unused)] &'static str);
-
-        #[derive(Component)]
-        struct Bald;
-
+    fn query_get() {
         let mut world = World::new();
 
-        let e0 = world.spawn((Name("e0"),)).id();
-        let e1 = world.spawn((Name("e1"), Bald)).id();
-        let e2 = world.spawn((Bald,)).id();
+        let human = world.spawn((Human, Hp(24))).id();
+        let la_creatura = world.spawn((LaCreatura, Hp(128))).id();
 
-        let mut query = world.query::<Entity, ()>().unwrap();
+        let query = world.query_mut::<(EntityId, &Hp)>().unwrap();
 
-        assert_eq!(query.next(), Some(e0));
-        assert_eq!(query.next(), Some(e1));
-        assert_eq!(query.next(), Some(e2));
-        assert!(query.next().is_none());
-    }
+        {
+            let (entity, hp) = query.get(human).unwrap();
 
-    #[test]
-    fn query_component() {
-        #[derive(Component)]
-        struct A(u32);
+            assert_eq!(entity, human);
+            assert_eq!(hp.0, 24);
+        }
 
-        #[derive(Component)]
-        struct B;
+        {
+            let (entity, hp) = query.get(la_creatura).unwrap();
 
-        let mut world = World::new();
-
-        world.spawn((A(0), B));
-        world.spawn((B,));
-        world.spawn((A(1),));
-
-        let mut query = world.query::<&A, ()>().unwrap();
-
-        assert_eq!(query.next().unwrap().0, 0);
-        assert_eq!(query.next().unwrap().0, 1);
-        assert!(query.next().is_none());
-    }
-
-    #[test]
-    fn invalid_multiple_borrow() {
-        #[derive(Component)]
-        struct A;
-
-        let mut world = World::new();
-
-        assert!(world.query_mut::<(&A, &mut A), ()>().is_err());
-        assert!(world.query_mut::<(&mut A, &mut A), ()>().is_err());
-        assert!(world.query_mut::<(&mut A, &mut A), ()>().is_err());
-    }
-
-    #[test]
-    fn valid_multiple_borrow() {
-        let mut world = World::new();
-
-        assert!(world.query_mut::<(&mut A, &mut B), ()>().is_ok());
-        assert!(world.query_mut::<(&A, &mut B), ()>().is_ok());
-        assert!(world.query_mut::<(&mut A, &B), ()>().is_ok());
-        assert!(world.query::<(&A, &B), ()>().is_ok());
-    }
-
-    #[test]
-    fn entity_ptr_valadity() {
-        let mut world = World::new();
-
-        assert!(world.query::<EntityRef<'_>, ()>().is_ok());
-        assert!(world.query_mut::<EntityMut<'_>, ()>().is_ok());
-        assert!(world.query::<(EntityRef<'_>, EntityRef<'_>), ()>().is_ok());
-        assert!(world
-            .query_mut::<(EntityMut<'_>, EntityMut<'_>), ()>()
-            .is_err());
-    }
-
-    #[test]
-    fn entity_and_component_borrow() {
-        #[derive(Component)]
-        struct A;
-
-        let mut world = World::new();
-
-        assert!(world.query::<(&A, EntityRef<'_>), ()>().is_ok());
-        assert!(world.query_mut::<(&mut A, EntityRef<'_>), ()>().is_err());
-        assert!(world.query_mut::<(&A, EntityMut<'_>), ()>().is_err());
-        assert!(world.query_mut::<(&mut A, EntityMut<'_>), ()>().is_err());
+            assert_eq!(entity, la_creatura);
+            assert_eq!(hp.0, 128);
+        }
     }
 }

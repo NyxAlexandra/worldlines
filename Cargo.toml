@@ -1,26 +1,23 @@
 [package]
-name = "archetypal-ecs"
+name = "worldlines"
 
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
-[features]
-default = ["derive"]
-#! Enables derive macros for traits.
-derive = ["dep:archetypal-ecs-macros"]
+[lib]
+bench = false
 
 [dependencies]
-archetypal-ecs-macros = { path = "./macros", optional = true }
+worldlines-macros.path = "./macros"
 
-atomic_refcell = "0.1.13"
-dashmap = "6.0.1"
 indexmap = "2.4.0"
 thiserror = "1.0.63"
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+# for benchmarks
+criterion = "0.5"
 
 # workspace
 # ---------
@@ -56,4 +53,10 @@ harness = false
 
 [[bench]]
 name = "bulk_remove"
+harness = false
+
+# `query`
+
+[[bench]]
+name = "query"
 harness = false

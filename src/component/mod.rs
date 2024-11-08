@@ -1,125 +1,90 @@
-#![allow(clippy::needless_pub_self)]
+//! Defines [`Component`].
 
-use std::any::TypeId;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use std::any::type_name;
 
-#[cfg(feature = "derive")]
-pub use archetypal_ecs_macros::Component;
-use dashmap::DashMap;
+use thiserror::Error;
+pub use worldlines_macros::Component;
 
-pub(self) use self::column::*;
+pub use self::bundle::*;
+pub(crate) use self::info::*;
+pub use self::set::*;
 pub(crate) use self::storage::*;
-pub(crate) use self::table::*;
-use crate::{
-    EntityMut,
-    EntityPtr,
-    QueryData,
-    ReadOnlyQueryData,
-    SparseIndex,
-    WorldAccess,
-};
+use crate::entity::{EntityId, EntityMut};
 
-mod column;
+mod bundle;
+mod info;
+mod set;
 mod storage;
-mod table;
+mod tuple_impl;
 
-/// A single value in an ECS.
+// TODO: docs for deriving hooks
+
+/// Trait for components, the data stored in an entity.
+///
+/// # Deriving
+///
+/// `Component` can be derived. Note that this does not place any requirements
+/// on input generics (unlike something like [`Clone`]), nor does it delegate
+/// component hooks of fields components.
+///
+/// The derive macro accepts the attribute `#[component(...)]`. It can be used
+/// to specify [`Component::after_insert`] and [`Component::before_remove`] with
+/// `#[component(after_insert = after_insert_fn, before_remove =
+/// before_remove_fn)]`.
 pub trait Component: Send + Sync + 'static {
-    /// Hook that is called when this component is inserted into an entity.
-    #[expect(unused_variables)]
-    fn on_insert(entity: EntityMut<'_>) {}
+    /// Called after this component is added to an entity that does not already
+    /// contain it, including when spawned.
+    #[expect(unused)]
+    fn after_insert(entity: EntityMut<'_>) {}
 
-    /// Hook that is called when this component is removed from an entity.
-    #[expect(unused_variables)]
-    fn on_remove(entity: EntityMut<'_>) {}
+    /// Called before this component is removed from and entity, including
+    /// despawn.
+    #[expect(unused)]
+    fn before_remove(entity: EntityMut<'_>) {}
 }
 
-/// A unique identifer for a [`Component`].
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct ComponentId(usize);
-
-impl ComponentId {
-    pub fn of<T: 'static>() -> Self {
-        static REGISTRY: OnceLock<DashMap<TypeId, ComponentId>> =
-            OnceLock::new();
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-        *REGISTRY
-            .get_or_init(Default::default)
-            .entry(TypeId::of::<T>())
-            .or_insert_with(|| Self(COUNTER.fetch_add(1, Ordering::Relaxed)))
-    }
+/// Error when accessing a [`Component`] an entity does not contain.
+#[derive(Debug, Clone, Copy, Error)]
+#[error("component {component} not found for entity {entity:?}")]
+pub struct ComponentNotFound {
+    entity: EntityId,
+    component: &'static str,
 }
 
-impl SparseIndex for ComponentId {
-    fn sparse_index(&self) -> usize {
-        self.0
-    }
-}
+impl ComponentNotFound {
+    pub(crate) fn new<C: Component>(entity: EntityId) -> Self {
+        let component = type_name::<C>();
 
-unsafe impl<C: Component> QueryData for &C {
-    type Output<'w> = &'w C;
-
-    fn access(access: &mut WorldAccess) {
-        access.component::<C>();
-    }
-
-    unsafe fn fetch(entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
-        unsafe { entity.get().ok() }
-    }
-}
-
-unsafe impl<C: Component> ReadOnlyQueryData for &C {}
-
-unsafe impl<C: Component> QueryData for &mut C {
-    type Output<'w> = &'w mut C;
-
-    fn access(access: &mut WorldAccess) {
-        access.component_mut::<C>();
-    }
-
-    unsafe fn fetch(mut entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
-        unsafe { entity.get_mut().ok() }
-    }
-}
-
-unsafe impl<C: Component> QueryData for Option<&C> {
-    type Output<'w> = Option<&'w C>;
-
-    fn access(access: &mut WorldAccess) {
-        access.component::<C>();
-    }
-
-    unsafe fn fetch(entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
-        unsafe { Some(entity.get().ok()) }
-    }
-}
-
-unsafe impl<C: Component> ReadOnlyQueryData for Option<&C> {}
-
-unsafe impl<C: Component> QueryData for Option<&mut C> {
-    type Output<'w> = Option<&'w mut C>;
-
-    fn access(access: &mut WorldAccess) {
-        access.component_mut::<C>();
-    }
-
-    unsafe fn fetch(mut entity: EntityPtr<'_>) -> Option<Self::Output<'_>> {
-        unsafe { Some(entity.get_mut().ok()) }
+        Self { entity, component }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::World;
+
+    #[derive(Component)]
+    #[component(after_insert = panic!("boom!"))]
+    struct Bomb;
+
+    #[derive(Component)]
+    #[component(before_remove = panic!("boom!"))]
+    struct DeadManSwitch;
 
     #[test]
-    fn component_id_unique() {
-        struct A;
-        struct B;
+    #[should_panic]
+    fn derived_on_insert_works() {
+        let mut world = World::new();
 
-        assert_ne!(ComponentId::of::<A>(), ComponentId::of::<B>());
+        world.spawn(Bomb);
+    }
+
+    #[test]
+    #[should_panic]
+    fn derived_on_remove_works() {
+        let mut world = World::new();
+
+        world.spawn(DeadManSwitch).despawn();
     }
 }

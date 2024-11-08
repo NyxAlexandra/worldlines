@@ -1,30 +1,25 @@
+//! A simplistic archetypal ECS implementation.
+
 #![forbid(unsafe_op_in_unsafe_fn)]
 
-// allows using derive macros that reference `archetypal_ecs` internally
-extern crate self as archetypal_ecs;
+// allows referencing this crate as `worldlines` in derives
+extern crate self as worldlines;
 
-pub use self::access::*;
-pub use self::app::*;
-pub use self::bundle::*;
-pub use self::component::*;
-pub use self::entity::*;
-pub use self::query::*;
-pub use self::queue::*;
-pub use self::resource::*;
-pub use self::schedule::*;
-pub use self::system::*;
-pub use self::util::*;
-pub use self::world::*;
-
-mod access;
-mod app;
-mod bundle;
-mod component;
-mod entity;
-mod query;
-mod queue;
-mod resource;
-mod schedule;
-mod system;
-mod util;
-mod world;
+pub mod access;
+pub mod commands;
+pub mod component;
+pub mod entity;
+pub mod query;
+mod storage;
+pub mod system;
+pub mod world;
+/// Re-export of all items in this crate.
+pub mod prelude {
+    pub use crate::access::*;
+    pub use crate::commands::*;
+    pub use crate::component::*;
+    pub use crate::entity::*;
+    pub use crate::query::*;
+    pub use crate::system::*;
+    pub use crate::world::*;
+}

@@ -1,8 +1,6 @@
-# `archetypal-ecs`
+# `worldlines`
 
 A simple archetypal ECS.
-
-(I'm still looking for a better name...)
 
 ## Usage
 
@@ -11,7 +9,7 @@ A simple example:
 ```rust
 use std::error::Error;
 
-use archetypal_ecs::*;
+use worldlines::prelude::*;
 
 #[derive(Component)]
 struct Person;
@@ -22,7 +20,7 @@ struct Dog;
 #[derive(Component)]
 struct Name(&'static str);
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), QueryError> {
     let mut world = World::new();
 
     // `World::spawn` takes a `Bundle`: a group of components. `Bundle` is
@@ -42,4 +40,4 @@ fn main() -> Result<(), Box<dyn Error>> {
 ## Re-exporting in other crates
 
 If you're a library author who wants to re-export derive macros from this crate, set
-`ARCHETYPAL_ECS_PATH` to `my_crate::archetypal_ecs` in a `build.rs` file or similar.
+`WORLDLINES_PATH` to `my_crate::worldlines` in a `build.rs` file or similar.

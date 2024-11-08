@@ -1,231 +1,258 @@
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
+use std::mem::MaybeUninit;
+use std::sync::{RwLock, RwLockWriteGuard};
 
-use super::Table;
-use crate::{array, Bundle, Entity, TypeData, TypeMap, TypeSet};
+use indexmap::IndexMap;
 
-/// Stores the components of entities in a [`World`](crate::World).
+use super::{
+    Bundle,
+    Component,
+    ComponentInfo,
+    ComponentSet,
+    ComponentSetBuilder,
+};
+use crate::entity::{EntityAddr, EntityId};
+use crate::storage::{SparseIndex, Table, TableRow, TypeIdHasher, TypeMap};
+
+/// Storage for all components.
 #[derive(Debug)]
 pub struct Components {
-    bundles: TypeMap<TableId>,
-    type_sets: HashMap<TypeSet, TableId>,
-    // not sparse as `TableId` is there is only one instance per `World`
+    info: RwLock<ComponentRegistry>,
+    bundle_indices: TypeMap<TableIndex>,
+    set_indices: HashMap<ComponentSet, TableIndex>,
     tables: Vec<Table>,
 }
 
-/// An identifier for a table.
+// TODO: optimize
+
+/// The type used to store component info.
+pub type ComponentRegistry =
+    IndexMap<TypeId, ComponentInfo, BuildHasherDefault<TypeIdHasher>>;
+
+/// Newtype for the index of a table in [`Components`].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TableId(usize);
+pub struct TableIndex(usize);
 
 impl Components {
+    /// Default table capacity.
+    const DEFAULT_TABLES: usize = 16;
+
+    /// Creates empty component storage.
     pub fn new() -> Self {
-        let bundles = TypeMap::default();
-        let type_sets = HashMap::default();
-        let tables = Vec::new();
+        let info = RwLock::default();
+        let bundle_indices = TypeMap::default();
+        let set_indices = HashMap::with_capacity(Self::DEFAULT_TABLES);
+        let tables = Vec::with_capacity(Self::DEFAULT_TABLES);
 
-        Self { bundles, type_sets, tables }
+        Self { info, bundle_indices, set_indices, tables }
     }
 
-    pub fn table(&self, table: TableId) -> Option<&Table> {
-        self.tables.get(table.0)
+    /// Returns a mutable reference to the component info registry.
+    pub fn registry(&self) -> RwLockWriteGuard<'_, ComponentRegistry> {
+        self.info.write().unwrap()
     }
 
-    pub fn table_mut(&mut self, table: TableId) -> Option<&mut Table> {
-        self.tables.get_mut(table.0)
+    /// Returns the component index for a component [`TypeId`].
+    ///
+    /// Returns `None` if the component hasn't been registered yet.
+    pub fn info_of_id(&self, type_id: TypeId) -> Option<ComponentInfo> {
+        self.info.read().unwrap().get(&type_id).copied()
     }
 
-    /// Reserve space for an amount of new entities containing bundle `B`.
-    pub fn reserve<B: Bundle>(&mut self, additional: usize) -> TableId {
-        let id = self.bundles.get(&TypeId::of::<B>()).copied().unwrap_or_else(
-            || {
-                let header = B::types();
+    /// Registers a component, returning its info.
+    pub fn register<C: Component>(&self) -> ComponentInfo {
+        let mut registry = self.registry();
+        let next = ComponentInfo::of::<C>(registry.len());
 
-                self.type_sets.get(&header).copied().unwrap_or_else(|| {
-                    let table = Table::new(header.clone());
-                    let id = TableId(self.tables.len());
-
-                    self.bundles.insert(TypeId::of::<B>(), id);
-                    self.type_sets.insert(header, id);
-                    self.tables.push(table);
-
-                    id
-                })
-            },
-        );
-        let table = unsafe { self.table_mut(id).unwrap_unchecked() };
-
-        table.reserve(additional);
-
-        id
+        *registry.entry(TypeId::of::<C>()).or_insert(next)
     }
 
-    /// Allocate an entity in the table for a bundle.
+    /// Returns a reference to the table with the given index.
     ///
     /// # Safety
     ///
-    /// The entity must not have already been allocated.
-    pub unsafe fn alloc<B: Bundle>(&mut self, entity: Entity) -> TableId {
-        let id = self.reserve::<B>(1);
-        let table = unsafe { self.table_mut(id).unwrap_unchecked() };
-
-        table.insert(entity);
-
-        id
+    /// The table index must refer to an allocated table.
+    pub unsafe fn get_unchecked(&self, index: TableIndex) -> &Table {
+        unsafe { self.tables.get_unchecked(index.0) }
     }
 
-    /// Reallocate the components of an entity to another table. `init` is
-    /// called on the new table to initialize new components (if they
-    /// exist).
-    ///
-    /// Components that are shared between the old and the new table are copied.
-    /// Components that aren't are dropped if `drop` is set.
-    ///
-    /// Returns `None` if the entity isn't in `old_table` or if the new header
-    /// is equivalent to the old one.
+    /// Returns a mutable reference to the table with the given index.
     ///
     /// # Safety
     ///
-    /// `init` must initialize new components, if necessary.
+    /// The table index must refer to an allocated table.
+    pub unsafe fn get_unchecked_mut(
+        &mut self,
+        index: TableIndex,
+    ) -> &mut Table {
+        unsafe { self.tables.get_unchecked_mut(index.0) }
+    }
+
+    /// Returns an iterator over the tables in storage.
+    pub fn tables(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (TableIndex, &Table)> {
+        self.tables.iter().enumerate().map(|(i, table)| (TableIndex(i), table))
+    }
+
+    /// Returns the table for the specified bundle.
+    ///
+    /// Will allocate a new table if one for that bundle didn't already exist.
+    pub fn alloc<B: Bundle>(&mut self, count: usize) -> EntityAddr {
+        let table = self
+            .bundle_indices
+            .get(&TypeId::of::<B>())
+            .copied()
+            .unwrap_or_else(|| {
+                let mut builder =
+                    ComponentSetBuilder::new(self.info.get_mut().unwrap());
+
+                B::components(&mut builder);
+
+                let components = builder.build();
+                let table =
+                    self.set_indices.get(&components).copied().unwrap_or_else(
+                        || {
+                            let table = TableIndex(self.tables.len());
+
+                            self.set_indices.insert(components.clone(), table);
+                            self.tables
+                                .push(Table::with_capacity(components, count));
+
+                            table
+                        },
+                    );
+
+                self.bundle_indices.insert(TypeId::of::<B>(), table);
+
+                table
+            });
+        let row = {
+            let table = unsafe { self.get_unchecked_mut(table) };
+
+            TableRow(table.entities().len())
+        };
+
+        EntityAddr { table, row }
+    }
+
+    /// Returns the table for the given component set.
+    ///
+    /// Will allocate a new table if one didn't already exist.
+    pub fn alloc_set(
+        &mut self,
+        count: usize,
+        components: ComponentSet,
+    ) -> EntityAddr {
+        let next = TableIndex(self.tables.len());
+        let table =
+            self.set_indices.get(&components).copied().unwrap_or_else(|| {
+                self.set_indices.insert(components.clone(), next);
+                self.tables.push(Table::with_capacity(components, count));
+
+                next
+            });
+        let row = {
+            let table = unsafe { self.get_unchecked_mut(table) };
+
+            TableRow(table.entities().len())
+        };
+
+        EntityAddr { table, row }
+    }
+
+    /// Reallocates an entity from one table to another.
+    ///
+    /// This will copy over all components that are in both tables. Components
+    /// that aren't moved are not dropped.
+    ///
+    /// # Safety
+    ///
+    /// The entity must be contained in the table and its components must be
+    /// initialized.
+    #[must_use = "the address must be used to set the correct `EntityAddr` in \
+                  `Entities`"]
     pub unsafe fn realloc(
         &mut self,
-        entity: Entity,
-        old_table: TableId,
-        new_header: TypeSet,
-        drop: bool,
-        init: impl FnOnce(&mut Table),
-    ) -> Option<TableId> {
-        {
-            let table = self.table(old_table)?;
+        entity: EntityId,
+        old_addr: EntityAddr,
+        components: ComponentSet,
+    ) -> EntityAddr {
+        debug_assert!(old_addr.table.0 < self.tables.len());
 
-            if !table.contains(entity) || table.header() == &new_header {
-                return None;
-            }
-        }
+        let new_addr = self.alloc_set(1, components);
 
-        let new_table =
-            self.type_sets.get(&new_header).copied().unwrap_or_else(|| {
-                let new_table = TableId(self.tables.len());
+        debug_assert_ne!(
+            old_addr, new_addr,
+            "cannot reallocate an entity to its own table",
+        );
 
-                self.type_sets.insert(new_header.clone(), new_table);
-                self.tables.push(Table::new(new_header.clone()));
-
-                new_table
-            });
-
-        if old_table == new_table {
-            return None;
-        }
-
-        {
-            let [old_table, new_table] = unsafe {
-                array::get_many_unchecked_mut(
-                    &mut self.tables,
-                    [old_table.0, new_table.0],
-                )
-            };
-
-            let intersection = old_table.header().intersection(&new_header);
-
-            // move existing components
-            for component in &intersection {
-                unsafe {
-                    let ptr =
-                        old_table.get_ptr_unchecked_mut(entity, component);
-
-                    new_table.insert(entity);
-                    new_table.write_ptr(entity, component, ptr);
-                    old_table.remove(entity);
-                }
-            }
-
-            // drop components that weren't moved
-            if drop {
-                let difference = old_table.header().difference(&new_header);
-
-                for component in &difference {
-                    unsafe {
-                        let ptr =
-                            old_table.get_ptr_unchecked_mut(entity, component);
-
-                        component.drop()(ptr);
-                    }
-                }
-            }
-
-            if new_header.len() > old_table.header().len() {
-                init(new_table);
-            }
-        }
-
-        Some(new_table)
-    }
-
-    /// Reallocate the components of an entity to another table. `init` is
-    /// called to initialize the new component.
-    ///
-    /// The component is dropped if `drop` is set.
-    ///
-    /// Returns `None` if `old_table` doesn't contain the entity.
-    ///
-    /// # Safety
-    ///
-    /// `init` must only initialize the component that is added.
-    pub unsafe fn realloc_with(
-        &mut self,
-        entity: Entity,
-        old_table: TableId,
-        component: TypeData,
-        drop: bool,
-        init: impl FnOnce(&mut Table),
-    ) -> Option<TableId> {
-        let new_header =
-            self.table(old_table)?.header().clone().with_type_data(component);
-
-        unsafe { self.realloc(entity, old_table, new_header, drop, init) }
-    }
-
-    /// Reallocate the components of an entity to another table. `init` is
-    /// called to initialize the new component.
-    ///
-    /// The component is dropped if `drop` is set.
-    ///
-    /// Returns `None` if `old_table` doesn't contain the entity.
-    pub fn realloc_without(
-        &mut self,
-        entity: Entity,
-        old_table: TableId,
-        component: TypeData,
-        drop: bool,
-    ) -> Option<TableId> {
-        let new_header = self
-            .table(old_table)?
-            .header()
-            .clone()
-            .without_type_data(component);
-
-        unsafe {
-            self.realloc(
-                entity,
-                old_table,
-                new_header,
-                drop,
-                |_| unreachable!(),
+        let [old_table, new_table] = unsafe {
+            get_many_unchecked_mut(
+                &mut self.tables,
+                [old_addr.table.0, new_addr.table.0],
             )
+        };
+
+        old_table.remove(old_addr.row);
+        unsafe { new_table.push(entity) };
+
+        let intersection =
+            old_table.components().intersection(new_table.components());
+
+        for component in intersection.iter() {
+            let component = component.index();
+
+            unsafe {
+                let ptr = old_table.get_unchecked_mut(old_addr.row, component);
+
+                new_table.write_ptr(new_addr.row, component, ptr);
+            }
         }
+
+        new_addr
     }
 
-    /// Drop the components of an entity.
-    pub fn free(&mut self, entity: Entity, table: TableId) -> Option<()> {
-        self.table_mut(table)?.free(entity)
-    }
-
-    /// Drop all components, but not the tables containing them.
+    /// Clears all tables in storage.
     pub fn clear(&mut self) {
-        // TODO: determine the semantics of clearing
-
         for table in &mut self.tables {
             table.clear();
         }
+    }
+}
+
+pub unsafe fn get_many_unchecked_mut<T, const N: usize>(
+    this: &mut [T],
+    indices: [usize; N],
+) -> [&mut T; N] {
+    // adapted from the standard library
+
+    let slice: *mut [T] = this;
+    let mut arr: MaybeUninit<[&mut T; N]> = MaybeUninit::uninit();
+    let arr_ptr = arr.as_mut_ptr();
+
+    unsafe {
+        for i in 0..N {
+            let index = *indices.get_unchecked(i);
+
+            *get_unchecked_mut(arr_ptr, i) =
+                &mut *get_unchecked_mut(slice, index);
+        }
+        arr.assume_init()
+    }
+}
+
+unsafe fn get_unchecked_mut<T>(this: *mut [T], index: usize) -> *mut T {
+    let ptr: *mut T = this as _;
+
+    unsafe { ptr.add(index) }
+}
+
+impl SparseIndex for TableIndex {
+    fn sparse_index(&self) -> usize {
+        self.0
     }
 }
