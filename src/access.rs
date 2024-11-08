@@ -1,251 +1,135 @@
-use std::fmt;
+//! Types for validating world access.
+
+use core::fmt;
 
 use thiserror::Error;
 
-use crate::{Component, ComponentId, Resource, SparseMap, TypeData};
+use crate::prelude::{Component, ComponentInfo, ComponentSet};
+use crate::storage::{SparseIndex, SparseSet};
+use crate::world::World;
 
-// TODO: refactor this to make it neater (and possibly improve errors)
-
-/// Tracks access to parts of a [`World`](crate::World).
-///
-/// Used to verify that [queries](crate::Query) and [systems](crate::System)
-/// don't alias internally or when constructing in parallel.
-#[derive(Debug, Clone)]
+/// Type that verifies that world access is correct.
+#[derive(Debug)]
 pub struct WorldAccess {
-    level: Level,
+    /// The current level of this access.
+    level: Option<Level>,
     world: Option<Level>,
-    entities: Option<Level>,
-    components: SparseMap<ComponentId, ComponentAccess>,
-    resources: SparseMap<ComponentId, ResourceAccess>,
-    error: Option<WorldAccessError>,
+    all_entities: Option<Level>,
+    components: SparseSet<ComponentAccess>,
+    /// The first error encountered.
+    ///
+    /// If the error exists, no more accesses can be added.
+    error: Option<AccessError>,
 }
 
-/// An error for [`WorldAccess`] that aliases.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("conflicting world access:\n- {first:?}\n- {second:?}")]
-pub struct WorldAccessError {
-    first: LeveledAccess,
-    second: LeveledAccess,
+/// Builder for [`WorldAccess`].
+pub struct WorldAccessBuilder<'w> {
+    world: &'w World,
+    output: WorldAccess,
 }
 
+/// An error for conflicting access.
+#[derive(Debug, Clone, Copy, Error)]
+#[error("conflicting world access\n- lhs: {lhs}\n- rhs: {rhs}")]
+pub struct AccessError {
+    lhs: Access,
+    rhs: Access,
+}
+
+/// A single access to the world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Access {
+    pub kind: AccessKind,
+    pub level: Level,
+}
+
+/// Represents access to a particular component.
 #[derive(Clone, Copy)]
 struct ComponentAccess {
-    component: TypeData,
+    info: ComponentInfo,
     level: Level,
+    required: bool,
 }
 
-#[derive(Clone, Copy)]
-struct ResourceAccess {
-    resource: TypeData,
-    level: Level,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct LeveledAccess {
-    access: Access,
-    level: Level,
-}
-
-/// A particular access to a [`World`](crate::World).
-///
-/// See [`WorldAccess`].
+/// The particular item accessed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Access {
+enum AccessKind {
+    /// Direct access to the world.
     World,
-    Entities,
-    Component(TypeData),
-    Resource(TypeData),
+    /// Access to all components of all entities.
+    AllEntities,
+    /// Access to a single component.
+    Component { info: ComponentInfo, required: bool },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Level {
+/// Read or write access.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
     Read,
     Write,
 }
 
 impl WorldAccess {
-    /// Returns a new [`WorldAccess`].
-    pub fn new() -> Self {
-        let level = Level::Read;
+    /// Creates a new empty access set.
+    pub const fn new() -> Self {
+        let level = None;
         let world = None;
-        let entities = None;
-        let resources = SparseMap::new();
-        let components = SparseMap::new();
+        let all_entities = None;
+        let components = SparseSet::new();
         let error = None;
 
-        Self { level, world, entities, components, resources, error }
+        Self { level, world, all_entities, components, error }
     }
 
-    /// Returns `true` if the access does not have aliasing issues.
-    pub fn is_valid(&self) -> bool {
-        self.error.is_none()
+    /// Creates a new world access builder.
+    pub const fn builder(world: &World) -> WorldAccessBuilder<'_> {
+        WorldAccessBuilder::new(world)
     }
 
-    /// Returns `true` if the access requires a mutable reference.
-    pub fn is_mutable(&self) -> bool {
-        self.level.is_write()
+    /// The current level of this access.
+    ///
+    /// Returns `None` if nothing is accessed.
+    pub fn level(&self) -> Option<Level> {
+        self.level
     }
 
-    /// Returns `true` if the access requires an immutable reference.
-    pub fn is_immutable(&self) -> bool {
-        self.level.is_read()
+    /// Returns a result for this access, `Err` if there is an access error.
+    pub fn result(&self) -> Result<(), AccessError> {
+        self.error.map(Err).unwrap_or(Ok(()))
     }
 
-    /// The first error encountered, if any.
-    pub fn error(&self) -> Option<WorldAccessError> {
-        self.error
+    /// Returns an iterator over all accesses in this set.
+    fn accesses(&self) -> impl Iterator<Item = Access> + '_ {
+        let world = self.world.map(Access::world);
+        let all_entities = self.all_entities.map(Access::all_entities);
+        let components = self.components.iter().copied().map(Into::into);
+
+        [world, all_entities].into_iter().flatten().chain(components)
     }
 
-    /// Returns `true` if this accesses a particular resource.
-    pub fn contains(&self, access: Access) -> bool {
-        self.access(access).is_some()
-    }
+    /// Returns `true` if the described component access is valid for a set of
+    /// components.
+    pub(crate) fn matches(&self, components: &ComponentSet) -> bool {
+        for access in self.accesses() {
+            let matches = match access.kind {
+                AccessKind::World | AccessKind::AllEntities => true,
+                AccessKind::Component { info, required } => {
+                    components.contains(info) || !required
+                },
+            };
 
-    fn access(&self, access: Access) -> Option<LeveledAccess> {
-        match access {
-            Access::World => self
-                .world
-                .map(|level| LeveledAccess { access: Access::World, level }),
-            Access::Entities => self
-                .entities
-                .map(|level| LeveledAccess { access: Access::Entities, level }),
-            Access::Component(component) => {
-                self.components.get(&component.component_id()).copied().map(
-                    |ComponentAccess { component, level }| LeveledAccess {
-                        access: Access::Component(component),
-                        level,
-                    },
-                )
-            },
-            Access::Resource(resource) => {
-                self.resources.get(&resource.component_id()).copied().map(
-                    |ResourceAccess { resource, level }| LeveledAccess {
-                        access: Access::Resource(resource),
-                        level,
-                    },
-                )
-            },
-        }
-    }
-
-    /// Adds a read of the entire world.
-    pub fn world(&mut self) {
-        self.add(Access::World, Level::Read);
-    }
-
-    /// Adds a write of the entire world.
-    pub fn world_mut(&mut self) {
-        self.add(Access::World, Level::Write);
-    }
-
-    /// Adds a read to all entities ([`World::entities`](crate::World)).
-    pub fn entities(&mut self) {
-        self.add(Access::Entities, Level::Read);
-    }
-
-    /// Adds a write to all entities ([`World::entities_mut`](crate::World)).
-    pub fn entities_mut(&mut self) {
-        self.add(Access::Entities, Level::Write);
-    }
-
-    /// Adds a read to all instances of component `C`.
-    pub fn component<C: Component>(&mut self) {
-        self.add(Access::Component(TypeData::of::<C>()), Level::Read);
-    }
-
-    /// Adds a write to all instances of component `C`.
-    pub fn component_mut<C: Component>(&mut self) {
-        self.add(Access::Component(TypeData::of::<C>()), Level::Write);
-    }
-
-    /// Adds a read of a resource `R`.
-    pub fn resource<R: Resource>(&mut self) {
-        self.add(Access::Resource(TypeData::of::<R>()), Level::Read);
-    }
-
-    /// Adds a read of a resource `R`.
-    pub fn resource_mut<R: Resource>(&mut self) {
-        self.add(Access::Resource(TypeData::of::<R>()), Level::Write);
-    }
-
-    /// Clears this [`WorldAccess`].
-    pub fn clear(&mut self) {
-        self.level = Level::Read;
-        self.world = None;
-        self.entities = None;
-        self.components.clear();
-        self.resources.clear();
-        self.error = None;
-    }
-
-    fn add(&mut self, access: Access, level: Level) {
-        if self.error.is_some() {
-            return;
-        }
-
-        if level.is_write() {
-            self.level = level;
-        }
-
-        let second = LeveledAccess { access, level };
-
-        for first in [
-            self.access(Access::World),
-            self.access(Access::Entities),
-            if let Access::Component(component) = access {
-                self.access(Access::Component(component))
-            } else {
-                None
-            },
-            if let Access::Resource(resource) = access {
-                self.access(Access::Resource(resource))
-            } else {
-                None
-            },
-        ]
-        .into_iter()
-        // TODO: replace with a `highest_component` field
-        .chain(self.components.iter().copied().map(
-            |ComponentAccess { component, level }| {
-                Some(LeveledAccess {
-                    access: Access::Component(component),
-                    level,
-                })
-            },
-        ))
-        .chain(self.resources.iter().copied().map(
-            |ResourceAccess { resource, level }| {
-                Some(LeveledAccess {
-                    access: Access::Resource(resource),
-                    level,
-                })
-            },
-        ))
-        .flatten()
-        {
-            if first.conflicts_with(second) {
-                self.error = Some(WorldAccessError { first, second });
-
-                return;
+            if !matches {
+                return false;
             }
         }
 
-        match access {
-            Access::World => self.world = Some(level),
-            Access::Entities => self.entities = Some(level),
-            Access::Component(component) => {
-                self.components.insert(
-                    component.component_id(),
-                    ComponentAccess { component, level },
-                );
-            },
-            Access::Resource(resource) => {
-                self.resources.insert(
-                    resource.component_id(),
-                    ResourceAccess { resource, level },
-                );
-            },
-        }
+        true
+    }
+
+    /// Returns a builder for adding new access to this set.
+    pub fn into_builder(self, world: &World) -> WorldAccessBuilder<'_> {
+        WorldAccessBuilder { world, output: self }
     }
 }
 
@@ -255,195 +139,223 @@ impl Default for WorldAccess {
     }
 }
 
+impl<'w> WorldAccessBuilder<'w> {
+    /// Creates a new world access builder.
+    pub const fn new(world: &'w World) -> Self {
+        let output = WorldAccess::new();
+
+        Self { world, output }
+    }
+
+    /// Adds a world borrow to the set.
+    pub fn borrows_world(&mut self, level: Level) {
+        self.add(Access::world(level));
+    }
+
+    /// Adds a borrow of all entities and their components to the set.
+    pub fn borrows_all_entities(&mut self, level: Level) {
+        self.add(Access::all_entities(level));
+    }
+
+    /// Adds a required component borrow to the set.
+    ///
+    /// If you don't require the component to exist, use
+    /// [`WorldAccessBuilder::maybe_borrows_component`].
+    pub fn borrows_component<C: Component>(&mut self, level: Level) {
+        let info = self.world.components.register::<C>();
+
+        self.add(Access::required_component(info, level));
+    }
+
+    /// Adds a non-required component borrow to the set.
+    ///
+    /// If you require the component to exist, use
+    /// [`WorldAccessBuilder::borrows_component`].
+    pub fn maybe_borrows_component<C: Component>(&mut self, level: Level) {
+        let info = self.world.components.register::<C>();
+
+        self.add(Access::component(info, level));
+    }
+
+    /// Builds the world access.
+    pub fn build(self) -> WorldAccess {
+        self.output
+    }
+
+    fn add(&mut self, access: Access) {
+        if self.output.error.is_some() {
+            return;
+        }
+
+        self.output.level = self.output.level.max(Some(access.level));
+
+        let mut error = None;
+
+        for existing_access in self.output.accesses() {
+            if access.conflicts_with(existing_access) {
+                error = Some(AccessError { lhs: access, rhs: existing_access });
+                break;
+            }
+        }
+
+        if let Some(conflict) = error {
+            self.output.error = Some(conflict);
+            return;
+        }
+
+        match access.kind {
+            AccessKind::World => self.output.world = Some(access.level),
+            AccessKind::AllEntities => {
+                self.output.all_entities = Some(access.level)
+            },
+            AccessKind::Component { info, required } => {
+                self.output.components.insert(ComponentAccess {
+                    info,
+                    level: access.level,
+                    required,
+                });
+            },
+        }
+    }
+}
+
+impl Access {
+    const fn component(info: ComponentInfo, level: Level) -> Self {
+        Self { kind: AccessKind::Component { info, required: false }, level }
+    }
+
+    const fn required_component(info: ComponentInfo, level: Level) -> Self {
+        Self { kind: AccessKind::Component { info, required: true }, level }
+    }
+
+    const fn all_entities(level: Level) -> Self {
+        Self { kind: AccessKind::AllEntities, level }
+    }
+
+    const fn world(level: Level) -> Self {
+        Self { kind: AccessKind::World, level }
+    }
+
+    fn conflicts_with(self, other: Self) -> bool {
+        (matches!(self.level, Level::Write)
+            || matches!(other.level, Level::Write))
+            && !self.kind.disjoint_with(other.kind)
+    }
+}
+
+impl fmt::Display for Access {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.kind {
+            AccessKind::World => write!(f, "{}World", self.level),
+            AccessKind::AllEntities => write!(f, "{}*", self.level),
+            AccessKind::Component { info, .. } => {
+                write!(f, "{}{}", self.level, info)
+            },
+        }
+    }
+}
+
+impl From<ComponentAccess> for Access {
+    fn from(component_access: ComponentAccess) -> Self {
+        let ComponentAccess { info, level, required } = component_access;
+
+        Self { kind: AccessKind::Component { info, required }, level }
+    }
+}
+
+impl SparseIndex for ComponentAccess {
+    fn sparse_index(&self) -> usize {
+        self.info.sparse_index()
+    }
+}
+
 impl fmt::Debug for ComponentAccess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LeveledAccess {
-            access: Access::Component(self.component),
-            level: self.level,
-        }
-        .fmt(f)
+        let Self { info, level, required } = *self;
+
+        Access { kind: AccessKind::Component { info, required }, level }.fmt(f)
     }
 }
 
-impl fmt::Debug for ResourceAccess {
+impl AccessKind {
+    /// Returns `true` if the union of this access and another is disjoint.
+    fn disjoint_with(self, other: Self) -> bool {
+        match (self, other) {
+            (
+                AccessKind::Component { info: lhs, .. },
+                AccessKind::Component { info: rhs, .. },
+            ) => lhs != rhs,
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Display for Level {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LeveledAccess {
-            access: Access::Resource(self.resource),
-            level: self.level,
-        }
-        .fmt(f)
-    }
-}
-
-impl LeveledAccess {
-    fn conflicts_with(self, other: Self) -> bool {
-        (self.level.is_write() || other.level.is_write())
-            && match (self.access, other.access) {
-                // conflict if multiple access to same component/resource
-                (Access::Component(first), Access::Component(second))
-                | (Access::Resource(first), Access::Resource(second)) => {
-                    first == second
-                },
-                // accesses to components and resources don't conflict
-                (Access::Component(_), Access::Resource(_))
-                | (Access::Resource(_), Access::Component(_)) => false,
-                // multiple-mutable access is only valid among
-                // components/resources
-                _ => true,
-            }
-    }
-}
-
-impl fmt::Debug for LeveledAccess {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.access {
-            Access::World => {
-                f.write_str(match self.level {
-                    Level::Read => "&",
-                    Level::Write => "&mut ",
-                })?;
-
-                f.write_str("World")
-            },
-            Access::Entities => f.write_str(match self.level {
-                Level::Read => "Entities",
-                Level::Write => "EntitiesMut",
-            }),
-            Access::Component(component) => {
-                f.write_str(match self.level {
-                    Level::Read => "&",
-                    Level::Write => "&mut ",
-                })?;
-
-                write!(f, "{}", component)
-            },
-            Access::Resource(resource) => {
-                f.write_str(match self.level {
-                    Level::Read => "Res<",
-                    Level::Write => "ResMut<",
-                })?;
-
-                write!(f, "{}", resource)?;
-
-                f.write_str(">")
-            },
-        }
-    }
-}
-
-impl Level {
-    fn is_read(self) -> bool {
-        matches!(self, Level::Read)
-    }
-
-    fn is_write(self) -> bool {
-        matches!(self, Level::Write)
+        f.write_str(match self {
+            Level::Read => "&",
+            Level::Write => "&mut ",
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prelude::*;
+
+    #[derive(Component)]
+    struct A;
+
+    #[derive(Component)]
+    struct B;
 
     #[test]
-    fn same_component_aliasing() {
-        struct A;
+    fn level_ord() {
+        assert_eq!(Level::Read.max(Level::Write), Level::Write);
+        assert_eq!(Level::Read.min(Level::Write), Level::Read);
+    }
+
+    #[test]
+    fn component_aliasing() {
+        let a = ComponentInfo::of::<A>(0);
+        let b = ComponentInfo::of::<B>(1);
 
         assert!(
-            !LeveledAccess {
-                access: Access::Component(TypeData::of::<A>()),
-                level: Level::Read,
-            }
-            .conflicts_with(LeveledAccess {
-                access: Access::Component(TypeData::of::<A>()),
-                level: Level::Read,
-            }),
-            "accesses to the same component don't alias if they are both reads",
+            !Access::component(a, Level::Read)
+                .conflicts_with(Access::component(a, Level::Read)),
+            "multiple reads to the same component don't alias",
         );
-
         assert!(
-            LeveledAccess {
-                access: Access::Component(TypeData::of::<A>()),
-                level: Level::Write,
-            }
-            .conflicts_with(LeveledAccess {
-                access: Access::Component(TypeData::of::<A>()),
-                level: Level::Read,
-            }),
-            "accesses to the same component alias if one is a write",
+            !Access::component(a, Level::Write)
+                .conflicts_with(Access::component(b, Level::Write)),
+            "multiple writes to different components don't alias",
+        );
+        assert!(
+            Access::component(a, Level::Write)
+                .conflicts_with(Access::component(a, Level::Read)),
+            "write and read access to a component alias",
+        );
+        assert!(
+            Access::component(a, Level::Write)
+                .conflicts_with(Access::component(a, Level::Write)),
+            "multiple writes to a component alias",
         );
     }
 
     #[test]
-    fn entity_conflicts_with_component() {
-        struct A;
+    fn entities_conflict_with_components() {
+        let a = ComponentInfo::of::<A>(0);
 
         assert!(
-            LeveledAccess { access: Access::Entities, level: Level::Write }
-                .conflicts_with(LeveledAccess {
-                    access: Access::Component(TypeData::of::<A>()),
-                    level: Level::Read,
-                }),
-            "access to all entities conflicts with access to components",
+            Access::all_entities(Level::Write)
+                .conflicts_with(Access::component(a, Level::Write)),
+            "entities require access to all components",
         );
         assert!(
-            LeveledAccess { access: Access::Entities, level: Level::Read }
-                .conflicts_with(LeveledAccess {
-                    access: Access::Component(TypeData::of::<A>()),
-                    level: Level::Write,
-                }),
-            "access to all entities conflicts with access to components",
+            Access::all_entities(Level::Read)
+                .conflicts_with(Access::component(a, Level::Write)),
+            "entities should require access to all components",
         );
-        assert!(
-            LeveledAccess { access: Access::Entities, level: Level::Write }
-                .conflicts_with(LeveledAccess {
-                    access: Access::Component(TypeData::of::<A>()),
-                    level: Level::Write,
-                }),
-            "access to all entities conflicts with access to components",
-        );
-        assert!(!LeveledAccess {
-            access: Access::Entities,
-            level: Level::Read
-        }
-        .conflicts_with(LeveledAccess {
-            access: Access::Component(TypeData::of::<A>()),
-            level: Level::Read,
-        }),);
-    }
-
-    #[test]
-    fn resource_conflicts_with_world() {
-        struct A;
-
-        assert!(
-            LeveledAccess { access: Access::World, level: Level::Write }
-                .conflicts_with(LeveledAccess {
-                    access: Access::Resource(TypeData::of::<A>()),
-                    level: Level::Read,
-                }),
-            "access to the world conflicts with access to resources",
-        );
-        assert!(
-            LeveledAccess { access: Access::World, level: Level::Read }
-                .conflicts_with(LeveledAccess {
-                    access: Access::Resource(TypeData::of::<A>()),
-                    level: Level::Write,
-                }),
-            "access to the world conflicts with access to resources",
-        );
-        assert!(
-            LeveledAccess { access: Access::World, level: Level::Write }
-                .conflicts_with(LeveledAccess {
-                    access: Access::Resource(TypeData::of::<A>()),
-                    level: Level::Write,
-                }),
-            "access to the world conflicts with access to resources",
-        );
-        assert!(!LeveledAccess { access: Access::World, level: Level::Read }
-            .conflicts_with(LeveledAccess {
-                access: Access::Resource(TypeData::of::<A>()),
-                level: Level::Read,
-            }),);
     }
 }

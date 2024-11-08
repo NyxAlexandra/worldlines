@@ -2,16 +2,11 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
-use indexmap::IndexMap;
-
 /// A [`HashMap`] mapping [`TypeId`]'s to values.
 pub type TypeMap<V> = HashMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
 
-/// An [`IndexMap`] mapping [`TypeId`]'s to values.
-pub type IndexTypeMap<V> =
-    IndexMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
-
 /// A hasher that specializes in hashing [`TypeId`]s.
+#[repr(transparent)]
 #[derive(Default)]
 pub struct TypeIdHasher {
     hash: u64,

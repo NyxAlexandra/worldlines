@@ -1,7 +1,9 @@
+use std::hint::black_box;
 use std::time::Duration;
 
-use archetypal_ecs::{Component, World};
 use criterion::{criterion_group, criterion_main, Criterion};
+use worldlines::component::Component;
+use worldlines::world::World;
 
 #[derive(Component)]
 struct A(#[expect(unused)] u32);
@@ -11,11 +13,13 @@ struct B(#[expect(unused)] u64);
 
 fn benchmark(c: &mut Criterion) {
     c.benchmark_group("bulk_spawn").bench_function("spawn", |bencher| {
+        const COUNT: usize = 10_000;
+
         bencher.iter(|| {
             let mut world = World::new();
 
-            for _ in 0..10000 {
-                world.spawn((A(123), B(321)));
+            for _ in 0..COUNT {
+                world.spawn(black_box((A(123), B(321))));
             }
         })
     });

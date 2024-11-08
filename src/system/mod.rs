@@ -1,298 +1,145 @@
-use std::borrow::Cow;
-use std::fmt;
+//! Rich functions that perform operations on the world.
 
-pub use self::any::*;
-pub use self::ext::*;
-pub use self::input::*;
-pub use self::local::*;
-pub use self::map::*;
-pub use self::named::*;
-pub use self::node::*;
-pub use self::stateless::*;
-use crate::{World, WorldAccess, WorldPtr};
+pub use self::var::*;
+use crate::access::WorldAccessBuilder;
+use crate::world::{World, WorldPtr};
 
-mod any;
-mod ext;
-mod input;
-mod local;
-mod map;
-mod named;
-mod node;
-mod stateless;
-
-// TODO: make `I: SystemInput + Tuple`
-//
-// gives better errors for users that mistakenly think that `fn(I0): System<I0>`
-// when it in actuality functions are `fn(I0): System<(I0,)>`
+mod tuple_impl;
+mod var;
 
 /// A unit of work in an ECS.
 ///
-/// # Function Systems
-///
-/// All types `F: FnMut(I0, .., In) -> O` implement `System<(I0, .., In), O>`.
-/// Note that a function that takes a single [`SystemInput`] implements
-/// `System<(I0,), O>` and not `System<I0, O>`.
-///
-/// Compiles:
-///
-/// ```
-/// # use archetypal_ecs::{World, assert_system};
-/// #
-/// fn system(_world: &World) {}
-///
-/// assert_system::<(&World,), _>(&system);
-/// ```
-///
-/// Does not compile:
-///
-/// ```compile_fail
-/// # use archetypal_ecs::{World, assert_system};
-/// #
-/// fn system(_world: &World) {}
-///
-/// assert_system::<&World, _>(&system);
-/// ```
-///
 /// # Safety
 ///
-/// [`System::access`] must follow the safety requirements for
-/// [`SystemInput::access`]. This is only important if you're overriding it
-/// manually.
+/// [`System::run`] must only access what it declares in [`System::access`].
 pub unsafe trait System<I: SystemInput, O = ()> {
-    /// Run this system.
+    /// The state of this system, retained between runs.
     ///
-    /// # Safety
-    ///
-    /// - The access of this system is valid.
-    /// - [`System::init`] must be called first.
-    unsafe fn run(&mut self, input: I::Output<'_, '_>) -> O;
+    /// Usually just the state of the system input.
+    type State: Send + Sync + 'static;
 
-    /// Initialize this system.
-    fn init(&mut self, world: &World) {
-        _ = world;
-    }
+    /// Initializes the state of this system.
+    fn init(&mut self, world: &World) -> Self::State;
 
-    /// What this system accesses.
-    ///
-    /// See [`SystemInput::access`].
-    fn access(&self, access: &mut WorldAccess) {
-        I::access(access);
-    }
-
-    /// An identifier for this system.
-    fn name(&self) -> Cow<'static, str> {
-        Cow::from(std::any::type_name_of_val(self))
-    }
-
-    /// Debug format this system.
-    ///
-    /// Defaults to [`System::name`].
-    fn debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.name(), f)
-    }
-}
-
-/// A [`System`] that can be ran from an immutable reference.
-///
-/// # Safety
-///
-/// [`System::access`] must match how the world is accessed.
-pub unsafe trait ReadOnlySystem<I, O = ()>
-where
-    Self: System<I, O>,
-    I: ReadOnlySystemInput,
-{
-    /// Run this system from an [`&World`](World) and input state.
-    ///
-    /// # Safety
-    ///
-    /// - The system access must be valid.
-    /// - [`System::init`] must have already been called.
-    unsafe fn run_from_ref(
+    /// Adds the access of this system to the set.
+    fn access(
         &mut self,
-        world: &World,
-        state: &mut I::State,
-    ) -> O {
-        let input = unsafe { I::get(world.as_ptr(), state) };
+        state: &Self::State,
+        builder: &mut WorldAccessBuilder<'_>,
+    );
 
-        unsafe { self.run(input) }
-    }
-
-    /// Run this system from an [`&World`](World) and input state once.
+    /// Runs this system.
     ///
     /// # Safety
     ///
-    /// - The system access must be valid.
-    /// - [`System::init`] must have already been called.
-    unsafe fn run_from_ref_once(&mut self, world: &World) -> O {
-        let mut state = I::init(world);
+    /// The access of this system must have be valid. The world pointer must be
+    /// valid for the described access. All required items need to be
+    /// present.
+    unsafe fn run(&mut self, state: &mut Self::State, world: WorldPtr<'_>)
+        -> O;
 
-        unsafe { self.run_from_ref(world, &mut state) }
+    /// Returns `true` if this system has work to apply in [`System::sync`].
+    #[expect(unused)]
+    fn needs_sync(&self, state: &Self::State) -> bool {
+        false
     }
+
+    /// Applies any deferred work to the world.
+    #[expect(unused)]
+    fn sync(&mut self, state: &mut Self::State, world: &mut World) {}
 }
 
-/// Trait for [`SystemInput`]s that can be constructed from an immutable
-/// reference.
+/// Trait for valid inputs to [`System`]s.
 ///
 /// # Safety
 ///
-/// The system must only set immutable acceses in [`SystemInput::access`]
-/// and not access the world mutably in [`SystemInput::get`].
+/// The access of this system set by [`SystemInput::access`] must be the same
+/// every time and must always match how the world is accessed in
+/// [`SystemInput::get`].
+pub unsafe trait SystemInput {
+    /// This system input borrowed for a lifetime.
+    type Output<'w, 's>: SystemInput<State = Self::State>;
+    /// The state of this input, retained between runs.
+    type State: Send + Sync + 'static;
+
+    /// Creates the state of this system input.
+    fn init(world: &World) -> Self::State;
+
+    /// Adds the access of this system input to the set.
+    fn access(state: &Self::State, builder: &mut WorldAccessBuilder<'_>);
+
+    /// Produces this system input from the world and state.
+    ///
+    /// # Safety
+    ///
+    /// The access of the system input must be valid. THe world pointer must be
+    /// valid for the described access. All required items need to be present.
+    unsafe fn get<'w, 's>(
+        state: &'s mut Self::State,
+        world: WorldPtr<'w>,
+    ) -> Self::Output<'w, 's>;
+
+    /// Returns `true` if this input has work to apply in [`SystemInput::sync`].
+    #[expect(unused)]
+    fn needs_sync(state: &Self::State) -> bool {
+        false
+    }
+
+    /// Applies any deferred work to the world.
+    #[expect(unused)]
+    fn sync(state: &mut Self::State, world: &mut World) {}
+}
+
+/// Trait for systems that don't need mutable access.
+///
+/// # Safety
+///
+/// The implementation must declare only read access and must never mutate the
+/// world.
+pub unsafe trait ReadOnlySystem<I: ReadOnlySystemInput, O>:
+    System<I, O>
+{
+    /// Runs this read-only system from a reference to the world.
+    fn run_from_ref(&mut self, state: &mut Self::State, world: &World) -> O {
+        // SAFETY: the access is valid, as no combination of read-only accesses
+        // can alias. the world pointer is valid for all reads.
+        unsafe { self.run(state, world.as_ptr()) }
+    }
+}
+
+/// Trait for system inputs that don't need mutable access.
+///
+/// # Safety
+///
+/// The implementation must declare only read access and must never mutate the
+/// world.
 pub unsafe trait ReadOnlySystemInput: SystemInput {}
-
-/// Function to assert that a variable implements [`System`].
-pub const fn assert_system<I: SystemInput, O>(_: &impl System<I, O>) {}
-
-/// Function to assert that a variable implements [`ReadOnlySystem`].
-pub const fn assert_read_only_system<I: ReadOnlySystemInput, O>(
-    _: &impl ReadOnlySystem<I, O>,
-) {
-}
-
-unsafe impl<F, O> System<(), O> for F
-where
-    F: FnMut() -> O,
-{
-    unsafe fn run(&mut self, _input: ()) -> O {
-        self()
-    }
-}
-
-impl<I, O> fmt::Debug for dyn System<I, O>
-where
-    I: SystemInput + 'static,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.debug(f)
-    }
-}
-
-unsafe impl<F, O> ReadOnlySystem<(), O> for F where F: FnMut() -> O {}
-
-impl<I, O> fmt::Debug for dyn ReadOnlySystem<I, O>
-where
-    I: ReadOnlySystemInput + 'static,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.debug(f)
-    }
-}
-
-macro_rules! impl_system {
-    ($($t:ident),*) => {
-        impl_system!([] [$($t)*]);
-    };
-
-    ([] []) => {};
-
-    ([$($t:ident)*] []) => {
-        unsafe impl<F, $($t,)* O> System<($($t,)*), O> for F
-        where
-            F: FnMut($($t,)*) -> O,
-            F: for<'w, 's> FnMut($($t::Output<'w, 's>,)*) -> O,
-            $($t: SystemInput,)*
-        {
-            #[allow(unused_variables, non_snake_case, clippy::needless_lifetimes)]
-            unsafe fn run<'w, 's>(&mut self, input: ($($t::Output<'w, 's>,)*)) -> O {
-                let ($($t,)*) = input;
-
-                self($($t,)*)
-            }
-        }
-
-        unsafe impl<F, $($t,)* O> ReadOnlySystem<($($t,)*), O> for F
-        where
-            F: FnMut($($t,)*) -> O,
-            F: for<'w, 's> FnMut($($t::Output<'w, 's>,)*) -> O,
-            $($t: ReadOnlySystemInput,)*
-        {
-        }
-
-        unsafe impl<$($t),*> SystemInput for ($($t,)*)
-        where
-            $($t: SystemInput,)*
-        {
-            type Output<'w, 's> = ($($t::Output<'w, 's>,)*);
-            type State = ($($t::State,)*);
-
-            #[allow(unused_variables)]
-            fn access(access: &mut WorldAccess) {
-                $(
-                    $t::access(access);
-                )*
-            }
-
-            #[allow(unused_variables, clippy::unused_unit)]
-            fn init(world: &World) -> Self::State {
-                ($($t::init(world),)*)
-            }
-
-            #[allow(non_snake_case, unused_variables, clippy::unused_unit)]
-            unsafe fn get<'w, 's>(
-                world: WorldPtr<'w>,
-                state: &'s mut Self::State,
-            ) -> Self::Output<'w, 's> {
-                let ($($t,)*) = state;
-
-                ($(unsafe { $t::get(world, $t) },)*)
-            }
-
-            #[allow(non_snake_case, unused_variables)]
-            fn apply(world: &mut World, state: &mut Self::State) {
-                let ($($t,)*) = state;
-
-                $(
-                    $t::apply(world, $t);
-                )*
-            }
-        }
-
-        unsafe impl<$($t),*> ReadOnlySystemInput for ($($t,)*)
-        where
-            $($t: ReadOnlySystemInput,)*
-        {
-        }
-
-        impl<$($t),*> StatelessSystemInput for ($($t,)*)
-        where
-            $($t: StatelessSystemInput,)*
-        {
-            fn init() -> Self::State {
-                ($(<$t as StatelessSystemInput>::init(),)*)
-            }
-        }
-    };
-
-    ([$($rest:ident)*]  [$head:ident $($tail:ident)*]) => {
-        impl_system!([$($rest)*] []);
-        impl_system!([$($rest)* $head] [$($tail)*]);
-    };
-}
-
-impl_system!(
-    I0, I1, I2, I3, I4, I5, I6, I7, I8, I9, I10, I11, I12, I13, I14, I15
-);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Entity, Query};
+    use crate::prelude::WorldQueue;
 
+    /// Ensures that the implementation of [`System`] for functions passes
+    /// through [`SystemInput::needs_sync`] and calls [`SystemInput::sync`].
     #[test]
-    fn boxed_system_dispatch() {
-        fn system(_world: &World, _query: Query<Entity>) {}
-
-        assert_read_only_system(&system);
-
-        let world = World::new();
-        let mut boxed: Box<dyn ReadOnlySystem<_>> = Box::new(system) as _;
-
-        unsafe {
-            system.run_once(world.as_ptr());
-            boxed.run_once(world.as_ptr());
-
-            system.run_from_ref_once(&world);
-            boxed.run_from_ref_once(&world);
+    fn fn_system_impl_applies_sync() {
+        fn system(mut queue: WorldQueue) {
+            queue.spawn(());
+            queue.spawn(());
         }
+
+        let mut world = World::new();
+        let mut state = system.init(&world);
+
+        // SAFETY: we know that `WorldQueue` has valid access and that the world
+        // pointer is valid as it was created from a reference
+        unsafe { system.run(&mut state, world.as_ptr()) };
+        assert!(system.needs_sync(&state));
+
+        system.sync(&mut state, &mut world);
+        assert!(!system.needs_sync(&state));
+
+        assert_eq!(world.len(), 2);
     }
 }

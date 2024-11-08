@@ -1,13 +1,17 @@
-// Stolen and modified from [HECS](https://github.com/Ralith/hecs/blob/ed23dedf77602756ffad2194558d7b23f54e2fc1/src/entities.rs#L151).
+//! Stolen and modified from [`hecs`](https://github.com/Ralith/hecs/blob/ed23dedf77602756ffad2194558d7b23f54e2fc1/src/entities.rs#L151).
 
 use std::iter::{self, Enumerate};
+use std::num::NonZeroU32;
+use std::ops::Range;
+use std::slice;
 use std::slice::SliceIndex;
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
-use std::{ops, slice};
 
-use crate::{Entity, TableId};
+use super::EntityId;
+use crate::component::TableIndex;
+use crate::storage::TableRow;
 
-/// Manages and allocates the entities in a [`World`](crate::World).
+/// Manages and allocates the entities in a [`World`](crate::world::World).
 #[derive(Debug)]
 pub struct Entities {
     slots: Vec<EntitySlot>,
@@ -21,19 +25,26 @@ pub struct Entities {
 #[derive(Debug, Clone, Copy)]
 pub struct EntitySlot {
     /// The version of the entity in this slot.
-    pub version: u32,
+    pub version: NonZeroU32,
     /// Whether the entity is currently alive or not.
     alive: bool,
-    /// The table index of the entity.
-    ///
     /// Is `None` until [`Entities::set`] is called for the entity that indexes
     /// this slot.
-    pub table: Option<TableId>,
+    pub addr: Option<EntityAddr>,
 }
 
-/// An iterator over the entities of a [`World`](crate::World).
+/// The exact location of an entity within its table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EntityAddr {
+    /// The table index of the entity.
+    pub table: TableIndex,
+    /// The index into `table.entities`.
+    pub row: TableRow,
+}
+
+/// An iterator over entity slots in [`Entities`].
 #[derive(Clone)]
-pub struct EntityIterIds<'w> {
+pub struct EntitySlots<'w> {
     inner: Enumerate<slice::Iter<'w, EntitySlot>>,
 }
 
@@ -58,6 +69,53 @@ impl Entities {
         self.len() == 0
     }
 
+    /// Whether the entity is currently alive.
+    pub fn contains(&self, entity: EntityId) -> bool {
+        if let Some(slot) = self.slots.get(entity.index as usize) {
+            slot.alive && slot.version == entity.version
+        } else {
+            let n = self.cursor.load(Ordering::Relaxed);
+
+            entity.version.get() == 1
+                && n < 0
+                // this is `<=` instead of `<` because we start indices at `0` instead of `1`
+                && (entity.index as isize) <= (n.abs() + self.slots.len() as isize)
+        }
+    }
+
+    /// Iterate over the entities in storage.
+    ///
+    /// Only iterates over allocated entities so as to preserve order of index.
+    /// As such, this will not include entities acquired from
+    /// [`Entities::reserve`].
+    pub fn iter(&self) -> EntitySlots<'_> {
+        self.iter_slice(..)
+    }
+
+    /// Iterate over a range of entities the entities in storage.
+    ///
+    /// Only iterates over allocated entities so as to preserve order of index.
+    /// As such, this will not include entities acquired from
+    /// [`Entities::reserve`].
+    pub fn iter_slice(
+        &self,
+        range: impl SliceIndex<[EntitySlot], Output = [EntitySlot]>,
+    ) -> EntitySlots<'_> {
+        EntitySlots { inner: self.slots[range].iter().enumerate() }
+    }
+
+    #[cfg(test)]
+    fn iter_ids(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.iter().map(|(id, _)| id)
+    }
+
+    /// Get the address of a entity.
+    pub fn get(&self, entity: EntityId) -> Option<EntityAddr> {
+        self.slots
+            .get(entity.index as usize)
+            .and_then(|EntitySlot { addr, .. }| *addr)
+    }
+
     /// Returns slot(s) for an index.
     pub fn slot<I: SliceIndex<[EntitySlot]>>(
         &self,
@@ -74,48 +132,10 @@ impl Entities {
         self.slots.get_mut(index)
     }
 
-    /// Whether the entity is currently alive.
-    pub fn contains(&self, entity: Entity) -> bool {
-        if let Some(slot) = self.slots.get(entity.index as usize) {
-            slot.alive && slot.version == entity.version
-        } else {
-            let n = self.cursor.load(Ordering::Relaxed);
-
-            entity.version == 0
-                && n < 0
-                // this is `<=` instead of `<` because we start indices at `0` instead of `1`
-                && (entity.index as isize) <= (n.abs() + self.slots.len() as isize)
-        }
-    }
-
-    /// Get the table of a entity.
-    pub fn get(&self, entity: Entity) -> Option<TableId> {
-        self.slots
-            .get(entity.index as usize)
-            .and_then(|EntitySlot { table, .. }| *table)
-    }
-
-    /// Iterate over the entities in storage.
-    ///
-    /// Only iterates over allocated entities so as to preserve order of index.
-    /// As such, this will not include entities acquired from
-    /// [`Entities::reserve`].
-    pub fn iter(&self) -> EntityIterIds<'_> {
-        debug_assert_eq!(
-            self.reserved.load(Ordering::Relaxed),
-            0,
-            "`Entities::iter` should only be called when all contained \
-             entities are allocated. The invariant that all entities are \
-             allocated should be held"
-        );
-
-        EntityIterIds { inner: self.slots.iter().enumerate() }
-    }
-
     /// Allocate a new entity.
     ///
     /// This will also allocated all reserved entities.
-    pub fn alloc(&mut self) -> Entity {
+    pub fn alloc(&mut self) -> EntityId {
         self.flush();
 
         self.allocated += 1;
@@ -123,44 +143,35 @@ impl Entities {
         if let Some(index) = self.pending.pop() {
             *self.cursor.get_mut() = self.pending.len() as _;
 
-            Entity { index, version: self.slots[index as usize].version }
+            EntityId::new(index, self.slots[index as usize].version)
         } else {
             self.slots.push(EntitySlot::new());
 
-            Entity {
-                index: u32::try_from(
-                    self.slots.len() + *self.reserved.get_mut() - 1,
-                )
-                .expect("entity overflow"),
-                version: 0,
-            }
+            EntityId::from_index(
+                u32::try_from(self.slots.len() + *self.reserved.get_mut() - 1)
+                    .expect("entity overflow"),
+            )
         }
     }
 
     /// Allocates an entity without reusing dead entities.
     ///
     /// Does not call [`Entities::flush`].
-    pub fn alloc_end(&mut self) -> Entity {
-        self.flush();
-
+    pub fn alloc_end(&mut self) -> EntityId {
         self.allocated += 1;
         self.slots.push(EntitySlot::new());
 
-        Entity {
-            index: u32::try_from(
-                self.slots.len() + *self.reserved.get_mut() - 1,
-            )
-            .expect("entity overflow"),
-            version: 0,
-        }
+        EntityId::from_index(
+            u32::try_from(self.slots.len() + *self.reserved.get_mut() - 1)
+                .expect("entity overflow"),
+        )
     }
 
     /// Allocates multiple entities at once.
     ///
     /// Returns the range of allocated [`EntitySlot`]s.
-    pub fn alloc_many(&mut self, count: usize) -> ops::Range<usize> {
+    pub fn alloc_many(&mut self, count: usize) -> Range<usize> {
         self.flush();
-
         self.allocated += count;
 
         let start = self.slots.len();
@@ -174,7 +185,7 @@ impl Entities {
     ///
     /// Reserved entities are fully allocated (as in having a slot allocated)
     /// whenever a mutating method is called.
-    pub fn reserve(&self) -> Entity {
+    pub fn reserve(&self) -> EntityId {
         self.reserved.fetch_add(1, Ordering::Relaxed);
 
         let n = self.cursor.fetch_sub(1, Ordering::Relaxed);
@@ -182,21 +193,20 @@ impl Entities {
         if n > 0 {
             let index = self.pending[(n - 1) as usize];
 
-            Entity { index, version: self.slots[index as usize].version }
+            EntityId::new(index, self.slots[index as usize].version)
         } else {
-            Entity {
-                index: u32::try_from(self.slots.len() as isize - n)
+            EntityId::from_index(
+                u32::try_from(self.slots.len() as isize - n)
                     .expect("entity overflow"),
-                version: 0,
-            }
+            )
         }
     }
 
     /// Free an entity, allowing its id to be reused.
     ///
-    /// Returns `Some(table_id)` if the entity existed (and thus was freed) and
-    /// the table was set.
-    pub fn free(&mut self, entity: Entity) -> Option<TableId> {
+    /// Returns the entity address if the entity existed (and thus was freed)
+    /// and the table was set.
+    pub fn free(&mut self, entity: EntityId) -> Option<EntityAddr> {
         self.flush();
 
         let slot = self.slots.get_mut(entity.index as usize)?;
@@ -205,9 +215,10 @@ impl Entities {
             return None;
         }
 
-        let table = slot.table.take();
+        let addr = slot.addr.take();
 
-        slot.version += 1;
+        slot.version =
+            slot.version.checked_add(1).expect("entity version overflow");
         slot.alive = false;
         self.pending.push(entity.index);
         *self.cursor.get_mut() = self.pending.len() as _;
@@ -215,19 +226,19 @@ impl Entities {
         // after [`Entities::flush`] was called above.
         self.allocated -= 1;
 
-        table
+        addr
     }
 
-    /// Set the table of an entity.
+    /// Set the address of an entity.
     ///
     /// Returns `Some` if the entity exists.
-    pub fn set(&mut self, entity: Entity, table: TableId) -> Option<()> {
+    pub fn set(&mut self, entity: EntityId, addr: EntityAddr) -> Option<()> {
         self.flush();
 
         self.slots
             .get_mut(entity.index as usize)
             .filter(|slot| slot.alive && slot.version == entity.version)
-            .map(|slot| slot.table = Some(table))
+            .map(|slot| slot.addr = Some(addr))
     }
 
     /// Clear allocation state and all entities.
@@ -281,8 +292,8 @@ impl Default for Entities {
 }
 
 impl<'a> IntoIterator for &'a Entities {
-    type IntoIter = EntityIterIds<'a>;
-    type Item = Entity;
+    type IntoIter = EntitySlots<'a>;
+    type Item = (EntityId, Option<EntityAddr>);
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -292,19 +303,23 @@ impl<'a> IntoIterator for &'a Entities {
 impl EntitySlot {
     /// A new live entity slot.
     ///
-    /// Starts at version `0` and without a table index.
+    /// Starts at version `1` and without an address.
     const fn new() -> Self {
-        Self { version: 0, alive: true, table: None }
+        Self {
+            version: unsafe { NonZeroU32::new_unchecked(1) },
+            alive: true,
+            addr: None,
+        }
     }
 }
 
-impl Iterator for EntityIterIds<'_> {
-    type Item = Entity;
+impl Iterator for EntitySlots<'_> {
+    type Item = (EntityId, Option<EntityAddr>);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().and_then(|(index, slot)| {
             if slot.alive {
-                Some(Entity { index: index as _, version: slot.version })
+                Some((EntityId::new(index as _, slot.version), slot.addr))
             } else {
                 self.next()
             }
@@ -312,7 +327,7 @@ impl Iterator for EntityIterIds<'_> {
     }
 }
 
-impl ExactSizeIterator for EntityIterIds<'_> {
+impl ExactSizeIterator for EntitySlots<'_> {
     fn len(&self) -> usize {
         self.inner.len()
     }
@@ -330,7 +345,8 @@ mod tests {
 
         let e0 = entities.reserve();
 
-        assert_eq!(e0, Entity { index: 0, version: 0 });
+        assert_eq!(e0.index, 0);
+        assert_eq!(e0.version.get(), 1);
         assert!(entities.contains(e0));
 
         assert_eq!(entities.len(), 1);
@@ -339,7 +355,8 @@ mod tests {
 
         let e1 = entities.alloc();
 
-        assert_eq!(e1, Entity { index: 1, version: 0 });
+        assert_eq!(e1.index, 1);
+        assert_eq!(e1.version.get(), 1);
         assert!(entities.contains(e1));
 
         assert_eq!(entities.len(), 2);
@@ -357,8 +374,6 @@ mod tests {
         assert_eq!(entities.allocated, 1);
 
         _ = entities.free(e1);
-
-        println!("after free e1: {:#?}", entities);
 
         assert!(!entities.contains(e1));
         assert!(entities.is_empty());
@@ -401,7 +416,7 @@ mod tests {
         ];
 
         {
-            let mut iter = entities.iter();
+            let mut iter = entities.iter().map(|(id, _)| id);
 
             assert_eq!(iter.next(), Some(e0));
             assert_eq!(iter.next(), Some(e1));
@@ -413,7 +428,7 @@ mod tests {
         entities.free(e1);
 
         {
-            let mut iter = entities.iter();
+            let mut iter = entities.iter_ids();
 
             assert_eq!(iter.next(), Some(e0));
             assert_eq!(iter.next(), Some(e2));
@@ -424,7 +439,7 @@ mod tests {
         entities.free(e2);
 
         {
-            let mut iter = entities.iter();
+            let mut iter = entities.iter_ids();
 
             assert_eq!(iter.next(), Some(e0));
             assert_eq!(iter.next(), Some(e3));
