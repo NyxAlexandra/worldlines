@@ -3,18 +3,7 @@
 use std::mem;
 
 pub use self::ptr::*;
-use crate::access::AccessError;
-use crate::commands::{Commands, EntityQueue};
-use crate::component::{Bundle, ComponentWriter, Components};
-use crate::entity::{
-    Entities,
-    EntityId,
-    EntityNotFound,
-    EntityRef,
-    EntitySlots,
-    EntityWorld,
-};
-use crate::query::{Query, QueryData, ReadOnlyQueryData};
+use crate::prelude::*;
 
 mod ptr;
 #[cfg(test)]
@@ -27,6 +16,7 @@ mod tests;
 pub struct World {
     pub(crate) entities: Entities,
     pub(crate) components: Components,
+    pub(crate) resources: Resources,
     /// Storage for internally-buffered commands.
     pub(crate) commands: Commands,
 }
@@ -48,9 +38,10 @@ impl World {
     pub fn new() -> Self {
         let entities = Entities::new();
         let components = Components::new();
+        let resources = Resources::new();
         let commands = Commands::new();
 
-        Self { entities, components, commands }
+        Self { entities, components, resources, commands }
     }
 
     /// Returns a pointer to this world.
@@ -63,22 +54,23 @@ impl World {
         WorldPtr::from_mut(self)
     }
 
-    /// Removes all entities from the world.
+    /// Removes all entities and resources from the world.
+    ///
+    /// To remove all entities or resources, see [`World::despawn_all`] and
+    /// [`World::destroy_all`].
     pub fn clear(&mut self) {
-        self.entities.clear();
-        self.components.clear();
-    }
-}
+        self.despawn_all();
+        self.destroy_all();
 
-impl Default for World {
-    fn default() -> Self {
-        Self::new()
+        debug_assert!(
+            self.commands.is_empty(),
+            "`World.commands` is only used internally and flushed immediately \
+             after use, as such it should be empty"
+        );
     }
 }
 
 /// # Entity methods
-///
-/// Methods for creating and managing entities.
 impl World {
     /// Returns the count of live entities in this world.
     pub fn len(&self) -> usize {
@@ -235,6 +227,12 @@ impl World {
         self.entity_mut(entity).map(EntityWorld::despawn)
     }
 
+    /// Despawns all entities.
+    pub fn despawn_all(&mut self) {
+        self.entities.clear();
+        self.components.clear();
+    }
+
     /// Ensures all entities are allocated and applies all buffered commands.
     pub(crate) fn flush(&mut self) {
         self.entities.flush();
@@ -243,6 +241,59 @@ impl World {
 
         commands.apply(self);
         self.commands = commands;
+    }
+}
+
+/// # Resource methods
+impl World {
+    /// Returns `true` if the world contains the resource.
+    #[doc(alias = "contains_resource")]
+    pub fn has<R: Resource>(&self) -> bool {
+        self.resources.contains::<R>()
+    }
+
+    /// Immutably borrows a resource.
+    ///
+    /// Returns an error if the resource already exists or is borrowed mutably.
+    pub fn resource<R: Resource>(&self) -> Result<Res<'_, R>, ResourceError> {
+        self.resources.get()
+    }
+
+    /// Mutably borrows a resource.
+    ///
+    /// Returns an error if the resource already exists or is already borrowed.
+    pub fn resource_mut<R: Resource>(
+        &self,
+    ) -> Result<ResMut<'_, R>, ResourceError> {
+        self.resources.get_mut()
+    }
+
+    /// Inserts a resource into the world.
+    ///
+    /// Returns the previous value if it exists.
+    #[doc(alias = "insert_resource")]
+    pub fn create<R: Resource>(&mut self, resource: R) -> Option<R> {
+        self.resources.insert(resource)
+    }
+
+    /// Removes a resource from the world.
+    ///
+    /// Returns an error if the resource doesn't exist.
+    #[doc(alias = "remove_resource")]
+    pub fn destroy<R: Resource>(&mut self) -> Result<R, ResourceError> {
+        self.resources.remove()
+    }
+
+    /// Removes all resources from the world.
+    #[doc(alias = "remove_all_resources")]
+    pub fn destroy_all(&mut self) {
+        self.resources.clear();
+    }
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
