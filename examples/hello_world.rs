@@ -1,13 +1,3 @@
-# `worldlines`
-
-A simple archetypal ECS.
-
-## Usage
-
-Basic example:
-
-<!-- Keep in sync with `./examples/hello_world.rs` -->
-```rust
 use worldlines::prelude::*;
 
 #[derive(Component)]
@@ -34,9 +24,3 @@ fn main() -> Result<(), AccessError> {
 
     Ok(())
 }
-```
-
-## Re-exporting in other crates
-
-If you're a library author who wants to re-export derive macros from this crate, set
-`WORLDLINES_PATH` to `my_crate::worldlines` in a `build.rs` file or similar.
