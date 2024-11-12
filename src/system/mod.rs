@@ -11,7 +11,8 @@ mod var;
 ///
 /// # Safety
 ///
-/// [`System::run`] must only access what it declares in [`System::access`].
+/// [`System::run`] must only access what it declares in
+/// [`System::world_access`].
 pub unsafe trait System<I: SystemInput, O = ()> {
     /// The state of this system, retained between runs.
     ///
@@ -22,7 +23,7 @@ pub unsafe trait System<I: SystemInput, O = ()> {
     fn init(&mut self, world: &World) -> Self::State;
 
     /// Adds the access of this system to the set.
-    fn access(
+    fn world_access(
         &mut self,
         state: &Self::State,
         builder: &mut WorldAccessBuilder<'_>,
@@ -53,8 +54,8 @@ pub unsafe trait System<I: SystemInput, O = ()> {
 ///
 /// # Safety
 ///
-/// The access of this system set by [`SystemInput::access`] must be the same
-/// every time and must always match how the world is accessed in
+/// The access of this system set by [`SystemInput::world_access`] must be the
+/// same every time and must always match how the world is accessed in
 /// [`SystemInput::get`].
 pub unsafe trait SystemInput {
     /// This system input borrowed for a lifetime.
@@ -66,7 +67,7 @@ pub unsafe trait SystemInput {
     fn init(world: &World) -> Self::State;
 
     /// Adds the access of this system input to the set.
-    fn access(state: &Self::State, builder: &mut WorldAccessBuilder<'_>);
+    fn world_access(state: &Self::State, builder: &mut WorldAccessBuilder<'_>);
 
     /// Produces this system input from the world and state.
     ///

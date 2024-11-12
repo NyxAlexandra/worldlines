@@ -69,7 +69,10 @@ unsafe impl SystemInput for WorldQueue<'_, '_> {
         Commands::new()
     }
 
-    fn access(_state: &Self::State, builder: &mut WorldAccessBuilder<'_>) {
+    fn world_access(
+        _state: &Self::State,
+        builder: &mut WorldAccessBuilder<'_>,
+    ) {
         builder.borrows_world(Level::Read);
     }
 

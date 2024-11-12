@@ -35,7 +35,11 @@ unsafe impl<T: Send + Sync + 'static> SystemInput for Var<'_, T> {
         None
     }
 
-    fn access(_state: &Self::State, _builder: &mut WorldAccessBuilder<'_>) {}
+    fn world_access(
+        _state: &Self::State,
+        _builder: &mut WorldAccessBuilder<'_>,
+    ) {
+    }
 
     unsafe fn get<'w, 's>(
         state: &'s mut Self::State,

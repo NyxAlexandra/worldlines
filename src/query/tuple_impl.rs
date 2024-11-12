@@ -8,8 +8,8 @@ macro_rules! impl_query_data {
             type Output<'w> = ($($t::Output<'w>,)*);
 
             #[allow(unused)]
-            fn access(builder: &mut crate::access::WorldAccessBuilder<'_>) {
-                $( $t::access(builder) );*
+            fn world_access(builder: &mut crate::access::WorldAccessBuilder<'_>) {
+                $( $t::world_access(builder) );*
             }
 
             #[allow(unused)]
