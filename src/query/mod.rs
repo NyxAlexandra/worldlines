@@ -288,10 +288,6 @@ impl<'w, 's, D: QueryData> Iterator for QueryIter<'w, 's, D> {
     type Item = D::Output<'w>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.len == 0 {
-            return None;
-        }
-
         let table = if let Some(table) = self.table {
             table
         } else {
@@ -300,11 +296,12 @@ impl<'w, 's, D: QueryData> Iterator for QueryIter<'w, 's, D> {
         let entity = unsafe {
             let table = self.world.as_ref().components.get_unchecked(table);
 
-            table.entity(self.row).or_else(|| table.entities().next().copied())
+            table.entity(self.row)
         };
 
         if let Some(entity) = entity {
             self.len -= 1;
+            self.row.0 += 1;
 
             Some(unsafe { D::get(self.world.entity(entity)) })
         } else if entity.is_none() && self.tables.len() != 0 {
@@ -487,12 +484,13 @@ mod tests {
         };
 
         let query = world.query::<(EntityId, &Hp)>().unwrap();
+        let mut iter = query.iter();
 
         assert_eq!(query.len(), 3);
 
-        for (entity, _) in &query {
-            assert!([human, la_creatura, butterfly].contains(&entity));
-        }
+        assert_eq!(iter.next().unwrap().0, human);
+        assert_eq!(iter.next().unwrap().0, la_creatura);
+        assert_eq!(iter.next().unwrap().0, butterfly);
     }
 
     #[test]
