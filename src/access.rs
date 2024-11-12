@@ -4,7 +4,13 @@ use core::fmt;
 
 use thiserror::Error;
 
-use crate::prelude::{Component, ComponentInfo, ComponentSet};
+use crate::prelude::{
+    Component,
+    ComponentInfo,
+    ComponentSet,
+    Resource,
+    ResourceInfo,
+};
 use crate::storage::{SparseIndex, SparseSet};
 use crate::world::World;
 
@@ -16,6 +22,7 @@ pub struct WorldAccess {
     world: Option<Level>,
     all_entities: Option<Level>,
     components: SparseSet<ComponentAccess>,
+    resources: SparseSet<ResourceAccess>,
     /// The first error encountered.
     ///
     /// If the error exists, no more accesses can be added.
@@ -43,14 +50,6 @@ struct Access {
     pub level: Level,
 }
 
-/// Represents access to a particular component.
-#[derive(Clone, Copy)]
-struct ComponentAccess {
-    info: ComponentInfo,
-    level: Level,
-    required: bool,
-}
-
 /// The particular item accessed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AccessKind {
@@ -60,6 +59,8 @@ enum AccessKind {
     AllEntities,
     /// Access to a single component.
     Component { info: ComponentInfo, required: bool },
+    /// Access to a single resource.
+    Resource { info: ResourceInfo, required: bool },
 }
 
 /// Read or write access.
@@ -70,6 +71,22 @@ pub enum Level {
     Write,
 }
 
+/// Represents access to a particular component.
+#[derive(Clone, Copy)]
+struct ComponentAccess {
+    info: ComponentInfo,
+    level: Level,
+    required: bool,
+}
+
+/// Represents access to a particular resource.
+#[derive(Clone, Copy)]
+struct ResourceAccess {
+    info: ResourceInfo,
+    level: Level,
+    required: bool,
+}
+
 impl WorldAccess {
     /// Creates a new empty access set.
     pub const fn new() -> Self {
@@ -77,9 +94,10 @@ impl WorldAccess {
         let world = None;
         let all_entities = None;
         let components = SparseSet::new();
+        let resources = SparseSet::new();
         let error = None;
 
-        Self { level, world, all_entities, components, error }
+        Self { level, world, all_entities, components, resources, error }
     }
 
     /// Creates a new world access builder.
@@ -104,23 +122,28 @@ impl WorldAccess {
         let world = self.world.map(Access::world);
         let all_entities = self.all_entities.map(Access::all_entities);
         let components = self.components.iter().copied().map(Into::into);
+        let resources = self.resources.iter().copied().map(Into::into);
 
-        [world, all_entities].into_iter().flatten().chain(components)
+        [world, all_entities]
+            .into_iter()
+            .flatten()
+            .chain(components)
+            .chain(resources)
     }
 
     /// Returns `true` if the described component access is valid for a set of
     /// components.
     pub(crate) fn matches(&self, components: &ComponentSet) -> bool {
         for access in self.accesses() {
-            let matches = match access.kind {
-                AccessKind::World | AccessKind::AllEntities => true,
-                AccessKind::Component { info, required } => {
-                    components.contains(info) || !required
+            match access.kind {
+                // doesn't match if this access requires the component but
+                // doesn't contain it
+                AccessKind::Component { info, required: true }
+                    if !components.contains(info) =>
+                {
+                    return false;
                 },
-            };
-
-            if !matches {
-                return false;
+                _ => {},
             }
         }
 
@@ -130,12 +153,6 @@ impl WorldAccess {
     /// Returns a builder for adding new access to this set.
     pub fn into_builder(self, world: &World) -> WorldAccessBuilder<'_> {
         WorldAccessBuilder { world, output: self }
-    }
-}
-
-impl Default for WorldAccess {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -177,6 +194,26 @@ impl<'w> WorldAccessBuilder<'w> {
         self.add(Access::component(info, level));
     }
 
+    /// Adds a required component borrow to the set.
+    ///
+    /// If you don't require the component to exist, use
+    /// [`WorldAccessBuilder::maybe_borrows_component`].
+    pub fn borrows_resource<R: Resource>(&mut self, level: Level) {
+        let info = self.world.resources.register::<R>();
+
+        self.add(Access::required_resource(info, level));
+    }
+
+    /// Adds a non-required component borrow to the set.
+    ///
+    /// If you require the component to exist, use
+    /// [`WorldAccessBuilder::borrows_component`].
+    pub fn maybe_borrows_resource<R: Resource>(&mut self, level: Level) {
+        let info = self.world.resources.register::<R>();
+
+        self.add(Access::resource(info, level));
+    }
+
     /// Builds the world access.
     pub fn build(self) -> WorldAccess {
         self.output
@@ -215,6 +252,13 @@ impl<'w> WorldAccessBuilder<'w> {
                     required,
                 });
             },
+            AccessKind::Resource { info, required } => {
+                self.output.resources.insert(ResourceAccess {
+                    info,
+                    level: access.level,
+                    required,
+                });
+            },
         }
     }
 }
@@ -226,6 +270,14 @@ impl Access {
 
     const fn required_component(info: ComponentInfo, level: Level) -> Self {
         Self { kind: AccessKind::Component { info, required: true }, level }
+    }
+
+    const fn resource(info: ResourceInfo, level: Level) -> Self {
+        Self { kind: AccessKind::Resource { info, required: false }, level }
+    }
+
+    const fn required_resource(info: ResourceInfo, level: Level) -> Self {
+        Self { kind: AccessKind::Resource { info, required: true }, level }
     }
 
     const fn all_entities(level: Level) -> Self {
@@ -243,6 +295,47 @@ impl Access {
     }
 }
 
+impl AccessKind {
+    /// Returns `true` if the union of this access and another is disjoint.
+    fn disjoint_with(self, other: Self) -> bool {
+        match (self, other) {
+            (
+                Self::Component { info: lhs, .. },
+                Self::Component { info: rhs, .. },
+            ) => lhs != rhs,
+            (
+                Self::Resource { info: lhs, .. },
+                Self::Resource { info: rhs, .. },
+            ) => lhs != rhs,
+            (Self::AllEntities, Self::Resource { .. })
+            | (Self::Resource { .. }, Self::AllEntities) => true,
+            _ => false,
+        }
+    }
+}
+
+// ---
+
+impl SparseIndex for ComponentAccess {
+    fn sparse_index(&self) -> usize {
+        self.info.sparse_index()
+    }
+}
+
+impl SparseIndex for ResourceAccess {
+    fn sparse_index(&self) -> usize {
+        self.info.sparse_index()
+    }
+}
+
+// ---
+
+impl Default for WorldAccess {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl fmt::Display for Access {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
@@ -250,6 +343,10 @@ impl fmt::Display for Access {
             AccessKind::AllEntities => write!(f, "{}*", self.level),
             AccessKind::Component { info, .. } => {
                 write!(f, "{}{}", self.level, info)
+            },
+            AccessKind::Resource { info, .. } => match self.level {
+                Level::Read => write!(f, "Res<{}>", info),
+                Level::Write => write!(f, "ResMut<{}>", info),
             },
         }
     }
@@ -263,30 +360,11 @@ impl From<ComponentAccess> for Access {
     }
 }
 
-impl SparseIndex for ComponentAccess {
-    fn sparse_index(&self) -> usize {
-        self.info.sparse_index()
-    }
-}
+impl From<ResourceAccess> for Access {
+    fn from(resource_access: ResourceAccess) -> Self {
+        let ResourceAccess { info, level, required } = resource_access;
 
-impl fmt::Debug for ComponentAccess {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { info, level, required } = *self;
-
-        Access { kind: AccessKind::Component { info, required }, level }.fmt(f)
-    }
-}
-
-impl AccessKind {
-    /// Returns `true` if the union of this access and another is disjoint.
-    fn disjoint_with(self, other: Self) -> bool {
-        match (self, other) {
-            (
-                AccessKind::Component { info: lhs, .. },
-                AccessKind::Component { info: rhs, .. },
-            ) => lhs != rhs,
-            _ => false,
-        }
+        Self { kind: AccessKind::Resource { info, required }, level }
     }
 }
 
@@ -299,15 +377,31 @@ impl fmt::Display for Level {
     }
 }
 
+impl fmt::Debug for ComponentAccess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { info, level, required } = *self;
+
+        Access { kind: AccessKind::Component { info, required }, level }.fmt(f)
+    }
+}
+
+impl fmt::Debug for ResourceAccess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { info, level, required } = *self;
+
+        Access { kind: AccessKind::Resource { info, required }, level }.fmt(f)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::prelude::*;
 
-    #[derive(Component)]
+    #[derive(Component, Resource)]
     struct A;
 
-    #[derive(Component)]
+    #[derive(Component, Resource)]
     struct B;
 
     #[test]
@@ -344,6 +438,33 @@ mod tests {
     }
 
     #[test]
+    fn resource_aliasing() {
+        let a = ResourceInfo::of::<A>(0);
+        let b = ResourceInfo::of::<B>(1);
+
+        assert!(
+            !Access::resource(a, Level::Read)
+                .conflicts_with(Access::resource(a, Level::Read)),
+            "multiple reads to the same resource don't alias",
+        );
+        assert!(
+            !Access::resource(a, Level::Write)
+                .conflicts_with(Access::resource(b, Level::Write)),
+            "multiple writes to different resources don't alias",
+        );
+        assert!(
+            Access::resource(a, Level::Write)
+                .conflicts_with(Access::resource(a, Level::Read)),
+            "write and read access to a resource alias",
+        );
+        assert!(
+            Access::resource(a, Level::Write)
+                .conflicts_with(Access::resource(a, Level::Write)),
+            "multiple writes to a resource alias",
+        );
+    }
+
+    #[test]
     fn entities_conflict_with_components() {
         let a = ComponentInfo::of::<A>(0);
 
@@ -356,6 +477,22 @@ mod tests {
             Access::all_entities(Level::Read)
                 .conflicts_with(Access::component(a, Level::Write)),
             "entities should require access to all components",
+        );
+    }
+
+    #[test]
+    fn entities_do_not_conflict_with_resources() {
+        let a = ResourceInfo::of::<A>(0);
+
+        assert!(
+            !Access::all_entities(Level::Write)
+                .conflicts_with(Access::resource(a, Level::Write)),
+            "entities don't access resources",
+        );
+        assert!(
+            !Access::all_entities(Level::Read)
+                .conflicts_with(Access::resource(a, Level::Write)),
+            "entities don't access resources",
         );
     }
 }

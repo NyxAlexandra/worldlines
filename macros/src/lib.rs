@@ -5,6 +5,7 @@ use syn::Ident;
 
 mod bundle;
 mod component;
+mod resource;
 
 #[proc_macro_derive(Component, attributes(component))]
 pub fn derive_component(input: TokenStream) -> TokenStream {
@@ -14,6 +15,11 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Bundle, attributes(bundle))]
 pub fn derive_bundle(input: TokenStream) -> TokenStream {
     bundle::derive(input)
+}
+
+#[proc_macro_derive(Resource, attributes(resource))]
+pub fn derive_resource(input: TokenStream) -> TokenStream {
+    resource::derive(input)
 }
 
 fn crate_path() -> syn::Result<syn::Path> {

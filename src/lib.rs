@@ -10,6 +10,7 @@ pub mod commands;
 pub mod component;
 pub mod entity;
 pub mod query;
+pub mod resource;
 mod storage;
 pub mod system;
 pub mod world;
@@ -20,6 +21,7 @@ pub mod prelude {
     pub use crate::component::*;
     pub use crate::entity::*;
     pub use crate::query::*;
+    pub use crate::resource::*;
     pub use crate::system::*;
     pub use crate::world::*;
 }
