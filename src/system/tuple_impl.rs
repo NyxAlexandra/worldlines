@@ -19,12 +19,12 @@ macro_rules! impl_tuples {
                 <($($t,)*) as crate::system::SystemInput>::init(world)
             }
 
-            fn access(
+            fn world_access(
                 &mut self,
                 state: &Self::State,
                 builder: &mut crate::access::WorldAccessBuilder<'_>,
             ) {
-                <($($t,)*) as crate::system::SystemInput>::access(state, builder);
+                <($($t,)*) as crate::system::SystemInput>::world_access(state, builder);
             }
 
             #[allow(unused_variables)]
@@ -77,7 +77,7 @@ macro_rules! impl_tuples {
                 ($($t::init(world),)*)
             }
 
-            fn access(
+            fn world_access(
                 state: &Self::State,
                 #[allow(unused)]
                 builder: &mut crate::access::WorldAccessBuilder<'_>,
@@ -85,7 +85,7 @@ macro_rules! impl_tuples {
                 #[allow(non_snake_case)]
                 let ($($t,)*) = state;
 
-                $($t::access($t, builder));*
+                $($t::world_access($t, builder));*
             }
 
             #[allow(unused_variables, clippy::unused_unit)]
