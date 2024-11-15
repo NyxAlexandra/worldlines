@@ -52,7 +52,7 @@ unsafe impl<T: Send + Sync + 'static> SystemInput for Var<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::System;
+    use crate::system::{IntoSystem, System};
 
     #[test]
     fn var_is_retained() {
@@ -63,6 +63,7 @@ mod tests {
         }
 
         let world = World::new();
+        let mut system = system.into_system();
         let mut state = system.init(&world);
 
         // SAFETY: the system access is valid as it doesn't access anything, the

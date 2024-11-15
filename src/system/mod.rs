@@ -1,9 +1,11 @@
 //! Rich functions that perform operations on the world.
 
+pub use self::function::*;
 pub use self::var::*;
 use crate::access::WorldAccessBuilder;
 use crate::world::{World, WorldPtr};
 
+mod function;
 mod tuple_impl;
 mod var;
 
@@ -13,7 +15,11 @@ mod var;
 ///
 /// [`System::run`] must only access what it declares in
 /// [`System::world_access`].
-pub unsafe trait System<I: SystemInput, O = ()> {
+pub unsafe trait System {
+    /// THe input to this system.
+    type Input: SystemInput;
+    /// The output of this system.
+    type Output;
     /// The state of this system, retained between runs.
     ///
     /// Usually just the state of the system input.
@@ -36,8 +42,11 @@ pub unsafe trait System<I: SystemInput, O = ()> {
     /// The access of this system must have be valid. The world pointer must be
     /// valid for the described access. All required items need to be
     /// present.
-    unsafe fn run(&mut self, state: &mut Self::State, world: WorldPtr<'_>)
-        -> O;
+    unsafe fn run(
+        &mut self,
+        state: &mut Self::State,
+        world: WorldPtr<'_>,
+    ) -> Self::Output;
 
     /// Returns `true` if this system has work to apply in [`System::sync`].
     #[expect(unused)]
@@ -91,17 +100,31 @@ pub unsafe trait SystemInput {
     fn sync(state: &mut Self::State, world: &mut World) {}
 }
 
+/// Trait for types that can be converted into a system.
+pub trait IntoSystem<I: SystemInput, O>: Sized {
+    /// The system this type can be converted into.
+    type Output: System<Input = I, Output = O>;
+
+    /// Converts this into a system.
+    fn into_system(self) -> Self::Output;
+}
+
 /// Trait for systems that don't need mutable access.
 ///
 /// # Safety
 ///
 /// The implementation must declare only read access and must never mutate the
 /// world.
-pub unsafe trait ReadOnlySystem<I: ReadOnlySystemInput, O>:
-    System<I, O>
+pub unsafe trait ReadOnlySystem: System
+where
+    Self::Input: ReadOnlySystemInput,
 {
     /// Runs this read-only system from a reference to the world.
-    fn run_from_ref(&mut self, state: &mut Self::State, world: &World) -> O {
+    fn run_from_ref(
+        &mut self,
+        state: &mut Self::State,
+        world: &World,
+    ) -> Self::Output {
         // SAFETY: the access is valid, as no combination of read-only accesses
         // can alias. the world pointer is valid for all reads.
         unsafe { self.run(state, world.as_ptr()) }
@@ -125,12 +148,13 @@ mod tests {
     /// through [`SystemInput::needs_sync`] and calls [`SystemInput::sync`].
     #[test]
     fn fn_system_impl_applies_sync() {
-        fn system(mut queue: WorldQueue) {
+        fn queue_entities(mut queue: WorldQueue) {
             queue.spawn(());
             queue.spawn(());
         }
 
         let mut world = World::new();
+        let mut system = queue_entities.into_system();
         let mut state = system.init(&world);
 
         // SAFETY: we know that `WorldQueue` has valid access and that the world
