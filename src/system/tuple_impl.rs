@@ -13,56 +13,56 @@ macro_rules! impl_tuples {
         {
             type Input = ($($t,)*);
             type Output = O;
-            type State = ($(<$t as $crate::system::SystemInput>::State,)*);
 
-            fn init(&mut self, world: &$crate::world::World) -> Self::State {
-                <($($t,)*) as $crate::system::SystemInput>::init(world)
+            fn needs_init(&self) -> bool {
+                self.state.is_none()
             }
 
-            fn world_access(
+            fn init(&mut self, world: &$crate::world::World) {
+                self.state
+                .get_or_insert_with(|| <($($t,)*) as $crate::system::SystemInput>::init(world));
+            }
+
+            unsafe fn world_access(
                 &mut self,
-                state: &Self::State,
                 builder: &mut $crate::access::WorldAccessBuilder<'_>,
             ) {
+                // SAFETY: the caller ensures that [`System::init`] has been called
+                let state = unsafe { self.state.as_mut().unwrap_unchecked() };
+
                 <($($t,)*) as $crate::system::SystemInput>::world_access(state, builder);
             }
 
             #[allow(unused_variables)]
-            unsafe fn run(
-                &mut self,
-                state: &mut Self::State,
-                world: $crate::world::WorldPtr<'_>,
-            ) -> Self::Output {
+            unsafe fn run(&mut self, world: $crate::world::WorldPtr<'_>) -> Self::Output {
+                // SAFETY: the caller ensures that [`System::init`] has been called
+                let state = unsafe { self.state.as_mut().unwrap_unchecked() };
+                // SAFETY: the caller ensures that the access is valid, that the world
+                // pointer is valid for the described access
                 #[allow(non_snake_case)]
-                let ($($t,)*) = state;
+                let ($($t,)*) =
+                    unsafe { <($($t,)*) as $crate::system::SystemInput>::get(state, world) };
 
-                (self.function)($(unsafe { $t::get($t, world) },)*)
+                (self.function)($($t),*)
             }
 
             #[allow(unused_variables)]
-            fn needs_sync(&self, state: &Self::State) -> bool {
+            fn needs_sync(&self) -> bool {
+                // SAFETY: the caller ensures that [`System::init`] has been called
                 #[allow(non_snake_case)]
-                let ($($t,)*) = state;
+                let state = unsafe { self.state.as_ref().unwrap_unchecked()};
 
-                false $(|| <$t as $crate::system::SystemInput>::needs_sync($t))*
+
+                <($($t,)*) as $crate::system::SystemInput>::needs_sync(state)
             }
 
             #[allow(unused_variables)]
-            fn sync(&mut self, state: &mut Self::State, world: &mut $crate::world::World) {
-                #[allow(non_snake_case)]
-                let ($($t,)*) = state;
+            unsafe fn sync(&mut self, world: &mut $crate::world::World) {
+                // SAFETY: the caller ensures that [`System::init`] has been called
+                let state = unsafe { self.state.as_mut().unwrap_unchecked() };
 
-                $($t::sync($t, world));*
+                <($($t,)*) as $crate::system::SystemInput>::sync(state, world);
             }
-        }
-
-        unsafe impl<F, $($t,)* O> $crate::system::ReadOnlySystem
-            for $crate::system::FunctionSystem<($($t,)*), O, F>
-        where
-            F: FnMut($($t,)*) -> O,
-            F: for<'w, 's> FnMut($($t::Output<'w, 's>,)*) -> O,
-            $($t: $crate::system::ReadOnlySystemInput,)*
-        {
         }
 
         impl<F, $($t,)* O> $crate::system::IntoSystem<($($t,)*), O> for F
@@ -112,6 +112,30 @@ macro_rules! impl_tuples {
 
                 ($(unsafe { $t::get($t, world) },)*)
             }
+
+            fn needs_sync(state: &Self::State) -> bool {
+                #[allow(non_snake_case)]
+                let ($($t,)*) = state;
+
+                false $(|| <$t as $crate::system::SystemInput>::needs_sync($t))*
+            }
+
+            #[allow(unused_variables)]
+            fn sync(state: &mut Self::State, world: &mut $crate::world::World) {
+                #[allow(non_snake_case)]
+                let ($($t,)*) = state;
+
+                $(<$t as $crate::system::SystemInput>::sync($t, world));*
+            }
+        }
+
+        unsafe impl<F, $($t,)* O> $crate::system::ReadOnlySystem
+            for $crate::system::FunctionSystem<($($t,)*), O, F>
+        where
+            F: FnMut($($t,)*) -> O,
+            F: for<'w, 's> FnMut($($t::Output<'w, 's>,)*) -> O,
+            $($t: $crate::system::ReadOnlySystemInput,)*
+        {
         }
 
         unsafe impl<$($t),*> $crate::system::ReadOnlySystemInput for ($($t,)*)

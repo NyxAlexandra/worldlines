@@ -64,12 +64,14 @@ mod tests {
 
         let world = World::new();
         let mut system = system.into_system();
-        let mut state = system.init(&world);
 
-        // SAFETY: the system access is valid as it doesn't access anything, the
-        // world pointer is valid
-        unsafe { system.run(&mut state, world.as_ptr()) };
+        system.init(&world);
+        // SAFETY: The system is initialized, system access is valid as it
+        // doesn't access anything, the world pointer is valid
+        unsafe { system.run(world.as_ptr()) };
 
-        assert_eq!(state.0, Some(1));
+        let (var,) = system.state().unwrap();
+
+        assert_eq!(var.as_ref(), Some(&1));
     }
 }

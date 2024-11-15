@@ -20,43 +20,42 @@ pub unsafe trait System {
     type Input: SystemInput;
     /// The output of this system.
     type Output;
-    /// The state of this system, retained between runs.
-    ///
-    /// Usually just the state of the system input.
-    type State: Send + Sync + 'static;
+
+    /// Returns `true` if this system needs to be initialized with
+    /// [`System::init`].
+    fn needs_init(&self) -> bool;
 
     /// Initializes the state of this system.
-    fn init(&mut self, world: &World) -> Self::State;
+    fn init(&mut self, world: &World);
 
     /// Adds the access of this system to the set.
-    fn world_access(
-        &mut self,
-        state: &Self::State,
-        builder: &mut WorldAccessBuilder<'_>,
-    );
+    ///
+    /// # Safety
+    ///
+    /// The system must be initialized.
+    unsafe fn world_access(&mut self, builder: &mut WorldAccessBuilder<'_>);
 
     /// Runs this system.
     ///
     /// # Safety
     ///
-    /// The access of this system must have be valid. The world pointer must be
-    /// valid for the described access. All required items need to be
-    /// present.
-    unsafe fn run(
-        &mut self,
-        state: &mut Self::State,
-        world: WorldPtr<'_>,
-    ) -> Self::Output;
+    /// The system must be initialized. The access of this system must be valid.
+    /// The world pointer must be valid for the described access. All
+    /// required items need to be present.
+    unsafe fn run(&mut self, world: WorldPtr<'_>) -> Self::Output;
 
     /// Returns `true` if this system has work to apply in [`System::sync`].
-    #[expect(unused)]
-    fn needs_sync(&self, state: &Self::State) -> bool {
+    fn needs_sync(&self) -> bool {
         false
     }
 
     /// Applies any deferred work to the world.
+    ///
+    /// # Safety
+    ///
+    /// The system must be initialized.
     #[expect(unused)]
-    fn sync(&mut self, state: &mut Self::State, world: &mut World) {}
+    unsafe fn sync(&mut self, world: &mut World) {}
 }
 
 /// Trait for valid inputs to [`System`]s.
@@ -120,14 +119,10 @@ where
     Self::Input: ReadOnlySystemInput,
 {
     /// Runs this read-only system from a reference to the world.
-    fn run_from_ref(
-        &mut self,
-        state: &mut Self::State,
-        world: &World,
-    ) -> Self::Output {
+    fn run_from_ref(&mut self, world: &World) -> Self::Output {
         // SAFETY: the access is valid, as no combination of read-only accesses
         // can alias. the world pointer is valid for all reads.
-        unsafe { self.run(state, world.as_ptr()) }
+        unsafe { self.run(world.as_ptr()) }
     }
 }
 
@@ -155,15 +150,17 @@ mod tests {
 
         let mut world = World::new();
         let mut system = queue_entities.into_system();
-        let mut state = system.init(&world);
+
+        system.init(&world);
 
         // SAFETY: we know that `WorldQueue` has valid access and that the world
         // pointer is valid as it was created from a reference
-        unsafe { system.run(&mut state, world.as_ptr()) };
-        assert!(system.needs_sync(&state));
+        unsafe { system.run(world.as_ptr()) };
+        assert!(system.needs_sync());
 
-        system.sync(&mut state, &mut world);
-        assert!(!system.needs_sync(&state));
+        // SAFETY: the system is initialized
+        unsafe { system.sync(&mut world) };
+        assert!(!system.needs_sync());
 
         assert_eq!(world.len(), 2);
     }
