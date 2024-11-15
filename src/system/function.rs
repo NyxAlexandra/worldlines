@@ -8,13 +8,26 @@ where
     I: SystemInput,
 {
     pub(super) function: F,
-    pub(super) _marker: PhantomData<fn(I) -> O>,
+    pub(super) state: Option<I::State>,
+    pub(super) _output: PhantomData<fn() -> O>,
 }
 
 impl<I: SystemInput, O, F> FunctionSystem<I, O, F> {
     /// Creates a new function system.
     pub fn new(function: F) -> Self {
-        Self { function, _marker: PhantomData }
+        let state = None;
+
+        Self { function, state, _output: PhantomData }
+    }
+
+    /// Returns a reference to the state of this system.
+    pub fn state(&self) -> Option<&I::State> {
+        self.state.as_ref()
+    }
+
+    /// Returns a mutable reference to the state of this system.
+    pub fn state_mut(&mut self) -> Option<&mut I::State> {
+        self.state.as_mut()
     }
 }
 

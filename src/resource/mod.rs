@@ -240,23 +240,26 @@ mod tests {
 
         {
             let mut system = non_requiring_system.into_system();
-            let mut state = system.init(&world);
 
-            // SAFETY: The system is read-only and world pointer is valid as it
-            // was constructed from a reference.
-            unsafe { system.run(&mut state, world.as_ptr()) };
+            system.init(&world);
+
+            // SAFETY: The system initialized and is read-only and world pointer
+            // is valid as it was constructed from a reference.
+            unsafe { system.run(world.as_ptr()) };
         }
 
         world.create(Counter(0));
 
         {
             let mut system = requiring_system.into_system();
-            let mut state = system.init(&world);
 
-            // SAFETY: The world pointer is valid as it was constructed from a
-            // mutable reference. The required accesses (only `Counter`)
-            // exists in the world
-            unsafe { system.run(&mut state, world.as_ptr_mut()) };
+            system.init(&world);
+
+            // SAFETY: The system is initialized and the world pointer is valid
+            // as it was constructed from a mutable reference. The
+            // required accesses (only `Counter`) exists in the
+            // world
+            unsafe { system.run(world.as_ptr_mut()) };
         }
 
         let counter: Res<'_, Counter> = world.resource().unwrap();
