@@ -4,6 +4,7 @@ name = "worldlines"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [lib]
@@ -31,6 +32,7 @@ members = ["macros"]
 authors = ["Alexandra Reaves <nyxalexandra@proton.me>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/NyxAlexandra/worldlines"
 version = "0.1.0"
 
 # benchmarks
