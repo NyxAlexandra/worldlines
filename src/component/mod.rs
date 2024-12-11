@@ -17,8 +17,6 @@ mod set;
 mod storage;
 mod tuple_impl;
 
-// TODO: docs for deriving hooks
-
 /// Trait for components, the data stored in an entity.
 ///
 /// # Deriving

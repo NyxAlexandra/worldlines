@@ -48,7 +48,7 @@ impl<'w> WorldPtr<'w> {
     }
 }
 
-impl<'w> fmt::Debug for WorldPtr<'w> {
+impl fmt::Debug for WorldPtr<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.world.fmt(f)
     }

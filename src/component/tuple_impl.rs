@@ -1,35 +1,35 @@
-macro_rules! impl_bundle {
-    ($($t:ident),*) => {
-        impl_bundle!([] [$($t)*]);
+macro_rules! tuple_impl {
+    ($($c:ident),*) => {
+        tuple_impl!([] [$($c)*]);
     };
 
-    ([$($t:ident)*] []) => {
-        unsafe impl<$($t),*> crate::component::Bundle for ($($t,)*)
+    ([$($c:ident)*] []) => {
+        unsafe impl<$($c),*> crate::component::Bundle for ($($c,)*)
         where
-            $($t: crate::component::Bundle),*
+            $($c: crate::component::Bundle),*
         {
             #[allow(unused, non_snake_case)]
             fn components(builder: &mut crate::component::ComponentSetBuilder<'_>) {
-                $($t::components(builder));*
+                $($c::components(builder));*
             }
 
             #[allow(unused, non_snake_case)]
             fn write(self, writer: &mut crate::component::ComponentWriter<'_, '_>) {
-                let ($($t,)*) = self;
+                let ($($c,)*) = self;
 
                 $(
-                    $t.write(writer);
+                    $c.write(writer);
                 )*
             }
         }
     };
 
-    ([$($rest:ident)*]  [$head:ident $($tail:ident)*]) => {
-        impl_bundle!([$($rest)*] []);
-        impl_bundle!([$($rest)* $head] [$($tail)*]);
+    ([$($rest:ident)*]  [$head:ident $($cail:ident)*]) => {
+        tuple_impl!([$($rest)*] []);
+        tuple_impl!([$($rest)* $head] [$($cail)*]);
     };
 }
 
-impl_bundle!(
+tuple_impl!(
     C0, C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15
 );
