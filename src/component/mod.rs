@@ -65,12 +65,16 @@ mod tests {
     use crate::world::World;
 
     #[derive(Component)]
-    #[component(after_insert = panic!("boom!"))]
+    #[component(after_insert = |_| panic!("boom!"))]
     struct Bomb;
 
     #[derive(Component)]
-    #[component(before_remove = panic!("boom!"))]
+    #[component(before_remove = entity_go_boom)]
     struct DeadManSwitch;
+
+    fn entity_go_boom(entity: EntityMut<'_>) {
+        panic!("{:?} went boom!", entity.id());
+    }
 
     #[test]
     #[should_panic]
