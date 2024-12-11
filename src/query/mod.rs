@@ -287,7 +287,7 @@ impl<'w, 's, D: QueryData> IntoIterator for &'s mut Query<'w, D> {
     }
 }
 
-impl<'w, 's, D: QueryData> Iterator for QueryIter<'w, 's, D> {
+impl<'w, D: QueryData> Iterator for QueryIter<'w, '_, D> {
     type Item = D::Output<'w>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -322,7 +322,7 @@ impl<'w, 's, D: QueryData> Iterator for QueryIter<'w, 's, D> {
     }
 }
 
-impl<'w, 's, D: QueryData> ExactSizeIterator for QueryIter<'w, 's, D> {}
+impl<D: QueryData> ExactSizeIterator for QueryIter<'_, '_, D> {}
 
 /// # Safety
 ///

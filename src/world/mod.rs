@@ -184,40 +184,49 @@ impl World {
     /// Spawns an entity for each bundle in an iterator.
     ///
     /// More efficient than calling [`World::spawn`] on each bundle.
-    pub fn spawn_iter<B: Bundle>(
+    pub fn spawn_iter(
         &mut self,
-        bundles: impl IntoIterator<Item = B>,
+        bundles: impl IntoIterator<Item: Bundle>,
     ) -> SpawnIter<'_> {
-        self.entities.flush();
+        #[track_caller]
+        #[inline(always)]
+        fn spawn_iter_inner<B: Bundle>(
+            world: &mut World,
+            bundles: impl IntoIterator<Item = B>,
+        ) -> SpawnIter<'_> {
+            world.entities.flush();
 
-        let bundles = bundles.into_iter();
+            let bundles = bundles.into_iter();
 
-        let (lower, upper) = bundles.size_hint();
-        let count = upper.unwrap_or(lower);
+            let (lower, upper) = bundles.size_hint();
+            let count = upper.unwrap_or(lower);
 
-        let first_index = self.entities.len();
-        // allocates enough space to hold the last entity
-        let addr = self.components.alloc::<B>((first_index + count) as _);
-        let mut allocated = self.entities.alloc_many(count);
+            let first_index = world.entities.len();
+            // allocates enough space to hold the last entity
+            let addr = world.components.alloc::<B>((first_index + count) as _);
+            let mut allocated = world.entities.alloc_many(count);
 
-        for bundle in bundles {
-            let entity = allocated
-                .next()
-                .map(|index| index as _)
-                .map(EntityId::from_index)
-                .unwrap_or_else(|| self.entities.alloc_end());
+            for bundle in bundles {
+                let entity = allocated
+                    .next()
+                    .map(|index| index as _)
+                    .map(EntityId::from_index)
+                    .unwrap_or_else(|| world.entities.alloc_end());
 
-            self.entities.set(entity, addr);
-            bundle.write(&mut ComponentWriter::new(
-                EntityQueue::new(entity, &mut self.commands),
-                &mut self.components,
-                addr,
-            ));
+                world.entities.set(entity, addr);
+                bundle.write(&mut ComponentWriter::new(
+                    EntityQueue::new(entity, &mut world.commands),
+                    &mut world.components,
+                    addr,
+                ));
+            }
+
+            world.flush();
+
+            SpawnIter { inner: world.entities.iter_slice(first_index..) }
         }
 
-        self.flush();
-
-        SpawnIter { inner: self.entities.iter_slice(first_index..) }
+        spawn_iter_inner(self, bundles)
     }
 
     /// Despawns an entity.
