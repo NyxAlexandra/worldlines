@@ -29,22 +29,14 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let after_insert = after_insert.map(|expr| {
         quote! {
             fn after_insert(entity: ::#crate_path::entity::EntityMut<'_>) {
-                // place this here so as to not apply `allow(unused_mut)` to user code
-                #[allow(unused_mut)]
-                let entity = entity;
-
-                #expr;
+                (#expr)(entity);
             }
         }
     });
     let before_remove = before_remove.map(|expr| {
         quote! {
             fn before_remove(entity: ::#crate_path::entity::EntityMut<'_>) {
-                // place this here so as to not apply `allow(unused_mut)` to user code
-                #[allow(unused_mut)]
-                let entity = entity;
-
-                #expr;
+                (#expr)(entity);
             }
         }
     });
