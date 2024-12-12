@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
-use super::{IntoSystem, System, SystemInput};
+use super::SystemInput;
+use crate::access::WorldAccess;
 
 /// A type that wraps functions to implement [`System`].
 pub struct FunctionSystem<I, O, F>
@@ -9,6 +10,7 @@ where
 {
     pub(super) function: F,
     pub(super) state: Option<I::State>,
+    pub(super) access: Option<WorldAccess>,
     pub(super) _output: PhantomData<fn() -> O>,
 }
 
@@ -16,8 +18,9 @@ impl<I: SystemInput, O, F> FunctionSystem<I, O, F> {
     /// Creates a new function system.
     pub fn new(function: F) -> Self {
         let state = None;
+        let access = None;
 
-        Self { function, state, _output: PhantomData }
+        Self { function, state, access, _output: PhantomData }
     }
 
     /// Returns a reference to the state of this system.
@@ -32,15 +35,3 @@ impl<I: SystemInput, O, F> FunctionSystem<I, O, F> {
 }
 
 // impls of `System` are in `tuple_impl.rs`
-
-impl<I, O, F> IntoSystem<I, O> for FunctionSystem<I, O, F>
-where
-    Self: System<Input = I, Output = O>,
-    I: SystemInput,
-{
-    type Output = Self;
-
-    fn into_system(self) -> Self::Output {
-        self
-    }
-}

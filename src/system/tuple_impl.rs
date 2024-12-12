@@ -11,7 +11,6 @@ macro_rules! tuple_impl {
             F: for<'w, 's> FnMut($($i::Output<'w, 's>,)*) -> O,
             $($i: $crate::system::SystemInput,)*
         {
-            type Input = ($($i,)*);
             type Output = O;
 
             fn needs_init(&self) -> bool {
@@ -19,18 +18,21 @@ macro_rules! tuple_impl {
             }
 
             fn init(&mut self, world: &$crate::world::World) {
-                self.state
-                .get_or_insert_with(|| <($($i,)*) as $crate::system::SystemInput>::init(world));
+                let state = <($($i,)*) as $crate::system::SystemInput>::init(world);
+                let mut builder = $crate::access::WorldAccess::builder(world);
+
+                <($($i,)*) as $crate::system::SystemInput>::world_access(
+                    &state,
+                    &mut builder,
+                );
+
+                self.state = Some(state);
+                self.access = Some(builder.build());
             }
 
-            unsafe fn world_access(
-                &mut self,
-                builder: &mut $crate::access::WorldAccessBuilder<'_>,
-            ) {
-                // SAFETY: the caller ensures that [`System::init`] has been called
-                let state = unsafe { self.state.as_mut().unwrap_unchecked() };
-
-                <($($i,)*) as $crate::system::SystemInput>::world_access(state, builder);
+            unsafe fn world_access(&self) -> &$crate::access::WorldAccess {
+                // SAFETY: the caller ensures that the system is init
+                unsafe { self.access.as_ref().unwrap_unchecked() }
             }
 
             #[allow(unused_variables)]
@@ -49,9 +51,7 @@ macro_rules! tuple_impl {
             #[allow(unused_variables)]
             fn needs_sync(&self) -> bool {
                 // SAFETY: the caller ensures that [`System::init`] has been called
-                #[allow(non_snake_case)]
                 let state = unsafe { self.state.as_ref().unwrap_unchecked()};
-
 
                 <($($i,)*) as $crate::system::SystemInput>::needs_sync(state)
             }
