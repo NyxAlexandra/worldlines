@@ -2,7 +2,7 @@
 
 pub use self::function::*;
 pub use self::var::*;
-use crate::access::WorldAccessBuilder;
+use crate::access::{WorldAccess, WorldAccessBuilder};
 use crate::world::{World, WorldPtr};
 
 mod function;
@@ -16,8 +16,6 @@ mod var;
 /// [`System::run`] must only access what it declares in
 /// [`System::world_access`].
 pub unsafe trait System {
-    /// THe input to this system.
-    type Input: SystemInput;
     /// The output of this system.
     type Output;
 
@@ -28,12 +26,19 @@ pub unsafe trait System {
     /// Initializes the state of this system.
     fn init(&mut self, world: &World);
 
-    /// Adds the access of this system to the set.
+    /// Calls [`System::init`] if [`System::needs_init`] returns `true`.
+    fn init_if_needed(&mut self, world: &World) {
+        if self.needs_init() {
+            self.init(world);
+        }
+    }
+
+    /// Returns the world access of this system.
     ///
     /// # Safety
     ///
     /// The system must be initialized.
-    unsafe fn world_access(&mut self, builder: &mut WorldAccessBuilder<'_>);
+    unsafe fn world_access(&self) -> &WorldAccess;
 
     /// Runs this system.
     ///
@@ -56,6 +61,18 @@ pub unsafe trait System {
     /// The system must be initialized.
     #[expect(unused)]
     unsafe fn sync(&mut self, world: &mut World) {}
+
+    /// Calls [`System::sync`] if [`System::needs_sync`] returns `true`.
+    ///
+    /// # Safety
+    ///
+    /// The system must be initialized.
+    unsafe fn sync_if_needed(&mut self, world: &mut World) {
+        if self.needs_sync() {
+            // SAFETY: the caller ensures that this system is initialized
+            unsafe { self.sync(world) };
+        }
+    }
 }
 
 /// Trait for valid inputs to [`System`]s.
@@ -100,9 +117,9 @@ pub unsafe trait SystemInput {
 }
 
 /// Trait for types that can be converted into a system.
-pub trait IntoSystem<I: SystemInput, O>: Sized {
+pub trait IntoSystem<I, O = ()>: Sized {
     /// The system this type can be converted into.
-    type Output: System<Input = I, Output = O>;
+    type Output: System<Output = O>;
 
     /// Converts this into a system.
     fn into_system(self) -> Self::Output;
@@ -114,10 +131,7 @@ pub trait IntoSystem<I: SystemInput, O>: Sized {
 ///
 /// The implementation must declare only read access and must never mutate the
 /// world.
-pub unsafe trait ReadOnlySystem: System
-where
-    Self::Input: ReadOnlySystemInput,
-{
+pub unsafe trait ReadOnlySystem: System {
     /// Runs this read-only system from a reference to the world.
     fn run_from_ref(&mut self, world: &World) -> Self::Output {
         // SAFETY: the access is valid, as no combination of read-only accesses
@@ -134,10 +148,44 @@ where
 /// world.
 pub unsafe trait ReadOnlySystemInput: SystemInput {}
 
+/// Trait for types that can be converted into a [`ReadOnlySystem`].
+pub trait IntoReadOnlySystem<I, O = ()>:
+    IntoSystem<I, O, Output: ReadOnlySystem>
+{
+}
+
+// ---
+
+/// Marker type for the identity implementation of [`IntoSystem`] for any type
+/// implementing [`System`].
+#[doc(hidden)]
+pub struct ForSystem;
+
+impl<S: System> IntoSystem<ForSystem, S::Output> for S {
+    type Output = Self;
+
+    fn into_system(self) -> Self::Output {
+        self
+    }
+}
+
+impl<S, I, O> IntoReadOnlySystem<I, O> for S where
+    S: IntoSystem<I, O, Output: ReadOnlySystem>
+{
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::prelude::WorldQueue;
+    use crate::query::Query;
+
+    fn _system_impls_into_system() {
+        fn system(_query: Query<()>) {}
+
+        // lol
+        system.into_system().into_system().into_system();
+    }
 
     /// Ensures that the implementation of [`System`] for functions passes
     /// through [`SystemInput::needs_sync`] and calls [`SystemInput::sync`].
