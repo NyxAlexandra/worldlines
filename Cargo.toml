@@ -29,7 +29,7 @@ resolver = "2"
 members = ["macros"]
 
 [workspace.package]
-authors = ["Alexandra Reaves <nyxalexandra@proton.me>"]
+authors = ["Alexandra Reaves <alexandra+git@reaves.io>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/NyxAlexandra/worldlines"
