@@ -105,7 +105,7 @@ impl Entities {
     }
 
     #[cfg(test)]
-    fn iter_ids(&self) -> impl Iterator<Item = EntityId> + '_ {
+    fn iter_ids(&self) -> impl Iterator<Item = EntityId> + use<'_> {
         self.iter().map(|(id, _)| id)
     }
 
