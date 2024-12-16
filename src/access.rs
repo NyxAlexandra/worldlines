@@ -118,7 +118,7 @@ impl WorldAccess {
     }
 
     /// Returns an iterator over all accesses in this set.
-    fn accesses(&self) -> impl Iterator<Item = Access> + '_ {
+    fn accesses(&self) -> impl Iterator<Item = Access> + use<'_> {
         let world = self.world.map(Access::world);
         let all_entities = self.all_entities.map(Access::all_entities);
         let components = self.components.iter().copied().map(Into::into);

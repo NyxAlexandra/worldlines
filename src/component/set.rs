@@ -28,7 +28,9 @@ impl ComponentSet {
     }
 
     // Used by `Table`.
-    pub fn slots(&self) -> impl Iterator<Item = Option<ComponentInfo>> + '_ {
+    pub fn slots(
+        &self,
+    ) -> impl Iterator<Item = Option<ComponentInfo>> + use<'_> {
         self.inner.slots().copied()
     }
 
