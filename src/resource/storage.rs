@@ -1,25 +1,15 @@
 use core::fmt;
-use std::any::{type_name, Any, TypeId};
-use std::sync::RwLock;
+use std::any::{type_name, Any};
 
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
-use indexmap::IndexMap;
 
-use super::{
-    Res,
-    ResMut,
-    Resource,
-    ResourceError,
-    ResourceIndex,
-    ResourceInfo,
-};
+use super::{Res, ResMut, Resource, ResourceError, ResourceId};
 use crate::storage::SparseMap;
 
 /// Storage for all resources.
 #[derive(Debug)]
 pub struct Resources {
-    registry: RwLock<IndexMap<TypeId, ResourceInfo>>,
-    resources: SparseMap<ResourceIndex, ResourceBox>,
+    inner: SparseMap<ResourceId, ResourceBox>,
 }
 
 /// Storage for a single resource.
@@ -30,70 +20,40 @@ struct ResourceBox {
 
 impl Resources {
     pub fn new() -> Self {
-        let registry = RwLock::default();
-        let resources = SparseMap::new();
+        let inner = SparseMap::new();
 
-        Self { registry, resources }
+        Self { inner }
     }
 
     pub fn contains<R: Resource>(&self) -> bool {
-        self.registry
-            .read()
-            .unwrap()
-            .get(&TypeId::of::<R>())
-            .map(|info| self.resources.contains(&info.index()))
-            .unwrap_or_default()
-    }
-
-    pub fn info_of<R: Resource>(&self) -> Result<ResourceInfo, ResourceError> {
-        self.registry
-            .read()
-            .unwrap()
-            .get(&TypeId::of::<R>())
-            .copied()
-            .ok_or(ResourceError::NotFound(type_name::<R>()))
-    }
-
-    pub fn register<R: Resource>(&self) -> ResourceInfo {
-        let mut registry = self.registry.write().unwrap();
-        let next = ResourceInfo::of::<R>(registry.len());
-
-        *registry.entry(TypeId::of::<R>()).or_insert(next)
+        self.inner.contains(&ResourceId::of::<R>())
     }
 
     pub fn get<R: Resource>(&self) -> Result<Res<'_, R>, ResourceError> {
-        let info = self.info_of::<R>()?.index();
-
-        self.resources
-            .get(&info)
+        self.inner
+            .get(&ResourceId::of::<R>())
             .ok_or(ResourceError::NotFound(type_name::<R>()))
             .and_then(|boxed| unsafe { boxed.get() })
     }
 
     pub fn get_mut<R: Resource>(&self) -> Result<ResMut<'_, R>, ResourceError> {
-        let index = self.info_of::<R>()?.index();
-
-        self.resources
-            .get(&index)
+        self.inner
+            .get(&ResourceId::of::<R>())
             .ok_or(ResourceError::NotFound(type_name::<R>()))
             .and_then(|boxed| unsafe { boxed.get_mut() })
     }
 
     pub fn insert<R: Resource>(&mut self, resource: R) -> Option<R> {
-        let index = self.register::<R>().index();
-
-        self.resources
-            .insert(index, ResourceBox::new(resource))
+        self.inner
+            .insert(ResourceId::of::<R>(), ResourceBox::new(resource))
             // SAFETY: the inner type is `R` because it was located at the index
             // of `R` in the registry
             .map(|boxed| unsafe { boxed.into_inner() })
     }
 
     pub fn remove<R: Resource>(&mut self) -> Result<R, ResourceError> {
-        let index = self.info_of::<R>()?.index();
-
-        self.resources
-            .remove(&index)
+        self.inner
+            .remove(&ResourceId::of::<R>())
             .ok_or(ResourceError::NotFound(type_name::<R>()))
             // SAFETY: the inner type is `R` because it was located at the index
             // of `R` in the registry
@@ -101,7 +61,7 @@ impl Resources {
     }
 
     pub fn clear(&mut self) {
-        self.resources.clear();
+        self.inner.clear();
     }
 }
 

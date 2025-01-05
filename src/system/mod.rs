@@ -2,7 +2,7 @@
 
 pub use self::function::*;
 pub use self::var::*;
-use crate::access::{WorldAccess, WorldAccessBuilder};
+use crate::access::WorldAccess;
 use crate::world::{World, WorldPtr};
 
 mod function;
@@ -92,7 +92,7 @@ pub unsafe trait SystemInput {
     fn init(world: &World) -> Self::State;
 
     /// Adds the access of this system input to the set.
-    fn world_access(state: &Self::State, builder: &mut WorldAccessBuilder<'_>);
+    fn world_access(state: &Self::State, access: &mut WorldAccess);
 
     /// Produces this system input from the world and state.
     ///

@@ -6,7 +6,7 @@ use thiserror::Error;
 pub use worldlines_macros::Component;
 
 pub use self::bundle::*;
-pub(crate) use self::info::*;
+pub use self::info::*;
 pub use self::set::*;
 pub(crate) use self::storage::*;
 use crate::entity::{EntityId, EntityMut};
@@ -29,7 +29,30 @@ mod tuple_impl;
 /// to specify [`Component::after_insert`] and [`Component::before_remove`] with
 /// `#[component(after_insert = after_insert_fn, before_remove =
 /// before_remove_fn)]`.
-pub trait Component: Send + Sync + 'static {
+///
+/// # Safety
+///
+/// The implementation of [`Component::id`] must use a static
+/// [`ComponentIdCell`] to store the id. The implementation must only create a
+/// [`ComponentIdCell`] for `Self`.
+///
+/// ```
+/// # use worldlines::prelude::*;
+/// #
+/// struct A;
+///
+/// unsafe impl Component for A {
+///     fn id() -> ComponentId {
+///         static ID: ComponentIdCell<A> = ComponentIdCell::new();
+///
+///         ID.get_or_init()
+///     }
+/// }
+/// ```
+pub unsafe trait Component: Send + Sync + 'static {
+    /// Returns the id of this component.
+    fn id() -> ComponentId;
+
     /// Called after this component is added to an entity that does not already
     /// contain it, including when spawned.
     #[expect(unused)]

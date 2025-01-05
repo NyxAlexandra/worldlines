@@ -4,6 +4,7 @@ use std::ptr::NonNull;
 
 use super::{SparseIndex, TableRow};
 use crate::component::ComponentInfo;
+use crate::prelude::ComponentVTable;
 
 /// Storage for a single component type.
 pub struct Column {

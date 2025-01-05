@@ -1,11 +1,11 @@
 //! Defines [`EntityRef`] and [`EntityMut`], references to entities in the
 //! world.
 
-use std::any::TypeId;
 use std::ptr;
 
 use super::{EntityAddr, EntityId, EntityNotFound, EntityPtr};
-use crate::component::{Component, ComponentInfo, ComponentNotFound};
+use crate::component::{Component, ComponentNotFound};
+use crate::prelude::ComponentId;
 use crate::storage::Table;
 use crate::world::World;
 
@@ -59,46 +59,28 @@ impl<'w> EntityRef<'w> {
         }
     }
 
-    pub(crate) fn component_info(
-        &self,
-        type_id: TypeId,
-    ) -> Option<ComponentInfo> {
-        // SAFETY: while this entity reference exists, the world must contain
-        // this entity and must be a valid world reference
-        let components = unsafe { &self.ptr.world().as_ref().components };
-
-        components.info_of_id(type_id)
-    }
-
     /// Returns `true` if this entity contains the component.
     pub fn contains<C: Component>(self) -> bool {
-        let Some(component) = self.component_info(TypeId::of::<C>()) else {
-            return false;
-        };
-
-        self.table().components().contains(component)
+        self.table().components().contains(ComponentId::of::<C>())
     }
 
     /// Returns a reference to a component of this entity.
     ///
     /// Returns an error if the component doesn't exist.
     pub fn get<C: Component>(self) -> Result<&'w C, ComponentNotFound> {
-        let err = ComponentNotFound::new::<C>(self.id());
-
-        let component =
-            self.component_info(TypeId::of::<C>()).ok_or(err)?.index();
+        let component = ComponentId::of::<C>();
         let table = self.table();
 
-        if table.components().contains(component) {
-            Ok(unsafe {
+        table
+            .components()
+            .contains(component)
+            .then(|| unsafe {
                 self.table()
                     .get_unchecked(self.addr.row, component)
                     .cast()
                     .as_ref()
             })
-        } else {
-            Err(err)
-        }
+            .ok_or(ComponentNotFound::new::<C>(self.id()))
     }
 }
 
@@ -172,15 +154,16 @@ impl<'w> EntityMut<'w> {
     pub fn get_mut<C: Component>(
         &mut self,
     ) -> Result<&'w mut C, ComponentNotFound> {
-        let component = self
-            .as_ref()
-            .component_info(TypeId::of::<C>())
-            .ok_or(ComponentNotFound::new::<C>(self.id()))?
-            .index();
+        let component = ComponentId::of::<C>();
         let row = self.addr.row;
+        let table = self.table_mut();
 
-        Ok(unsafe {
-            self.table_mut().get_unchecked_mut(row, component).cast().as_mut()
-        })
+        table
+            .components()
+            .contains(component)
+            .then(|| unsafe {
+                table.get_unchecked_mut(row, component).cast::<C>().as_mut()
+            })
+            .ok_or(ComponentNotFound::new::<C>(self.id()))
     }
 }

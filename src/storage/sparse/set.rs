@@ -1,5 +1,4 @@
 use core::slice;
-use std::borrow::Borrow;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
@@ -50,10 +49,13 @@ impl<I: SparseIndex> SparseSet<I> {
     /// The index is any type that the actual key can borrow as.
     pub fn contains<Q>(&self, index: &Q) -> bool
     where
-        Q: SparseIndex,
-        I: Borrow<Q>,
+        Q: SparseIndex + PartialEq<I>,
     {
-        self.inner.get(index.sparse_index()).is_some_and(Option::is_some)
+        self.inner
+            .get(index.sparse_index())
+            .map(Option::as_ref)
+            .flatten()
+            .is_some_and(|i| index == i)
     }
 
     /// Inserts an index into the set.
@@ -82,12 +84,12 @@ impl<I: SparseIndex> SparseSet<I> {
     /// Returns the previous value if it existed in the set.
     pub fn remove<Q>(&mut self, index: &Q) -> Option<I>
     where
-        Q: SparseIndex,
-        I: Borrow<Q>,
+        Q: SparseIndex + PartialEq<I>,
     {
         self.inner
             .get_mut(index.sparse_index())
             .and_then(Option::take)
+            .filter(|i| index == i)
             .inspect(|_| self.len -= 1)
     }
 

@@ -30,7 +30,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         .map(|(i, Field { ident, ty, .. })| {
             (
                 quote! {
-                    #ty::components(builder)
+                    #ty::components(components)
                 },
                 {
                     let field_ident = ident.map(FieldIdent::Named).unwrap_or(
@@ -50,7 +50,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         unsafe impl #impl_generics ::#crate_path::component::Bundle for #ident #type_generics
         #where_clause
         {
-            fn components(builder: &mut ::#crate_path::component::ComponentSetBuilder<'_>) {
+            fn components(components: &mut ::#crate_path::component::ComponentSet) {
                 #(#components_bodies);*
             }
 

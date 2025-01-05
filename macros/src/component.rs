@@ -26,6 +26,14 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let (impl_generics, type_generics, where_clause) =
         generics.split_for_impl();
 
+    let id = quote! {
+        fn id() -> ::#crate_path::component::ComponentId {
+            static ID: ::#crate_path::component::ComponentIdCell<#ident #type_generics> =
+                ::#crate_path::component::ComponentIdCell::new();
+
+            ID.get_or_init()
+        }
+    };
     let after_insert = after_insert.map(|expr| {
         quote! {
             fn after_insert(entity: ::#crate_path::entity::EntityMut<'_>) {
@@ -43,9 +51,11 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     quote! {
         #[automatically_derived]
-        impl #impl_generics ::#crate_path::component::Component for #ident #type_generics
+        unsafe impl #impl_generics ::#crate_path::component::Component for #ident #type_generics
         #where_clause
         {
+            #id
+
             #after_insert
 
             #before_remove

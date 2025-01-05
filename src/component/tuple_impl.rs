@@ -9,8 +9,8 @@ macro_rules! tuple_impl {
             $($c: crate::component::Bundle),*
         {
             #[allow(unused, non_snake_case)]
-            fn components(builder: &mut crate::component::ComponentSetBuilder<'_>) {
-                $($c::components(builder));*
+            fn components(components: &mut crate::component::ComponentSet) {
+                $($c::components(components));*
             }
 
             #[allow(unused, non_snake_case)]

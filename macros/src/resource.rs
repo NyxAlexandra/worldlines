@@ -13,9 +13,15 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     quote! {
         #[automatically_derived]
-        impl #impl_generics ::#crate_path::resource::Resource for #ident #type_generics
+        unsafe impl #impl_generics ::#crate_path::resource::Resource for #ident #type_generics
         #where_clause
         {
+            fn id() -> ::#crate_path::resource::ResourceId {
+                static ID: ::#crate_path::resource::ResourceIdCell<#ident #type_generics> =
+                    ::#crate_path::resource::ResourceIdCell::new();
+
+                ID.get_or_init()
+            }
         }
     }.into()
 }

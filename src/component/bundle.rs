@@ -1,6 +1,12 @@
 pub use worldlines_macros::Bundle;
 
-use super::{Component, ComponentSetBuilder, Components};
+use super::{
+    Component,
+    ComponentInfo,
+    ComponentSet,
+    ComponentVTable,
+    Components,
+};
 use crate::commands::EntityQueue;
 use crate::entity::EntityAddr;
 
@@ -12,8 +18,8 @@ use crate::entity::EntityAddr;
 /// [`Bundle::write`] must call [`ComponentWriter::write`] on every component
 /// declared in [`Bundle::write`].
 pub unsafe trait Bundle: Send + 'static {
-    /// Returns the type set for the components of this bundle.
-    fn components(builder: &mut ComponentSetBuilder<'_>);
+    /// Adds the components of the bundle to the component set.
+    fn components(components: &mut ComponentSet);
 
     /// Writes the components of this bundle to ECS storage.
     fn write(self, writer: &mut ComponentWriter<'_, '_>);
@@ -28,8 +34,8 @@ pub struct ComponentWriter<'w, 's> {
 }
 
 unsafe impl<C: Component> Bundle for C {
-    fn components(builder: &mut ComponentSetBuilder<'_>) {
-        builder.insert::<Self>();
+    fn components(components: &mut ComponentSet) {
+        components.insert(ComponentInfo::of::<Self>());
     }
 
     fn write(self, writer: &mut ComponentWriter<'_, '_>) {
@@ -52,12 +58,12 @@ impl<'w, 's> ComponentWriter<'w, 's> {
     ///
     /// Panics if the entity doesn't contain the component.
     pub fn write<C: Component>(&mut self, component: C) {
-        let info = self.components.register::<C>();
+        let info = ComponentInfo::of::<C>();
 
         unsafe {
             let table = self.components.get_unchecked_mut(self.addr.table);
 
-            table.write(self.addr.row, info.index(), component).expect(
+            table.write(self.addr.row, info.id(), component).expect(
                 "attempted to write a bundle component to an entity that \
                  doesn't contain the component",
             )

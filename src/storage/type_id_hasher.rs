@@ -1,20 +1,15 @@
-use std::any::TypeId;
-use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
-
-/// A [`HashMap`] mapping [`TypeId`]'s to values.
-pub type TypeMap<V> = HashMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
+use std::hash::{BuildHasher, Hasher};
 
 /// A hasher that specializes in hashing [`TypeId`]s.
 #[repr(transparent)]
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct TypeIdHasher {
-    hash: u64,
+    inner: u64,
 }
 
 impl Hasher for TypeIdHasher {
     fn finish(&self) -> u64 {
-        self.hash
+        self.inner
     }
 
     fn write(&mut self, _bytes: &[u8]) {
@@ -22,6 +17,14 @@ impl Hasher for TypeIdHasher {
     }
 
     fn write_u64(&mut self, i: u64) {
-        self.hash = i;
+        self.inner = i;
+    }
+}
+
+impl BuildHasher for TypeIdHasher {
+    type Hasher = Self;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        *self
     }
 }

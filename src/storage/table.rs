@@ -2,7 +2,7 @@ use std::mem;
 use std::ptr::NonNull;
 
 use super::{Column, SparseIndex, SparseIter, SparseMap};
-use crate::component::{Component, ComponentIndex, ComponentSet};
+use crate::component::{Component, ComponentId, ComponentSet};
 use crate::entity::EntityId;
 
 /// Storage for entities with the same components.
@@ -10,7 +10,7 @@ use crate::entity::EntityId;
 pub struct Table {
     components: ComponentSet,
     entities: SparseMap<TableRow, EntityId>,
-    columns: SparseMap<ComponentIndex, Column>,
+    columns: SparseMap<ComponentId, Column>,
 }
 
 /// The row in [`Table.entities`](Table) of an entity.
@@ -90,7 +90,7 @@ impl Table {
     pub unsafe fn get_unchecked(
         &self,
         row: TableRow,
-        component: ComponentIndex,
+        component: ComponentId,
     ) -> NonNull<u8> {
         debug_assert!(self.components.contains(component));
 
@@ -107,7 +107,7 @@ impl Table {
     pub unsafe fn get_unchecked_mut(
         &mut self,
         row: TableRow,
-        component: ComponentIndex,
+        component: ComponentId,
     ) -> NonNull<u8> {
         debug_assert!(self.components.contains(component));
 
@@ -126,14 +126,14 @@ impl Table {
     pub unsafe fn write<C: Component>(
         &mut self,
         row: TableRow,
-        index: ComponentIndex,
-        mut component: C,
+        component: ComponentId,
+        mut value: C,
     ) -> Option<()> {
         unsafe {
-            self.write_ptr(row, index, NonNull::from(&mut component).cast())
+            self.write_ptr(row, component, NonNull::from(&mut value).cast())
                 // this write has move semantics, so call `forget` to ensure
                 // that `component` does not get dropped
-                .inspect(|_| mem::forget(component))
+                .inspect(|_| mem::forget(value))
         }
     }
 
@@ -149,12 +149,12 @@ impl Table {
     pub unsafe fn write_ptr(
         &mut self,
         row: TableRow,
-        index: ComponentIndex,
-        component: NonNull<u8>,
+        component: ComponentId,
+        value: NonNull<u8>,
     ) -> Option<()> {
         self.columns
-            .get_mut(&index)
-            .map(|column| unsafe { column.write(row, component) })
+            .get_mut(&component)
+            .map(|column| unsafe { column.write(row, value) })
     }
 
     /// Replaces the previous component with a new value.
@@ -166,7 +166,7 @@ impl Table {
     pub unsafe fn replace<C: Component>(
         &mut self,
         row: TableRow,
-        component: ComponentIndex,
+        component: ComponentId,
         value: C,
     ) -> C {
         unsafe {

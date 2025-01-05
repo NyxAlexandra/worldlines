@@ -8,7 +8,7 @@ use std::slice::SliceIndex;
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 
 use super::EntityId;
-use crate::component::TableIndex;
+use crate::component::TableId;
 use crate::storage::TableRow;
 
 /// Manages and allocates the entities in a [`World`](crate::world::World).
@@ -37,7 +37,7 @@ pub struct EntitySlot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EntityAddr {
     /// The table index of the entity.
-    pub table: TableIndex,
+    pub table: TableId,
     /// The index into `table.entities`.
     pub row: TableRow,
 }

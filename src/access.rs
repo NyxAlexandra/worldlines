@@ -8,11 +8,11 @@ use crate::prelude::{
     Component,
     ComponentInfo,
     ComponentSet,
+    ComponentVTable,
     Resource,
     ResourceInfo,
 };
 use crate::storage::{SparseIndex, SparseSet};
-use crate::world::World;
 
 /// Type that verifies that world access is correct.
 #[derive(Debug)]
@@ -27,12 +27,6 @@ pub struct WorldAccess {
     ///
     /// If the error exists, no more accesses can be added.
     error: Option<AccessError>,
-}
-
-/// Builder for [`WorldAccess`].
-pub struct WorldAccessBuilder<'w> {
-    world: &'w World,
-    output: WorldAccess,
 }
 
 /// An error for conflicting access.
@@ -100,11 +94,6 @@ impl WorldAccess {
         Self { level, world, all_entities, components, resources, error }
     }
 
-    /// Creates a new world access builder.
-    pub const fn builder(world: &World) -> WorldAccessBuilder<'_> {
-        WorldAccessBuilder::new(world)
-    }
-
     /// The current level of this access.
     ///
     /// Returns `None` if nothing is accessed.
@@ -139,7 +128,7 @@ impl WorldAccess {
                 // doesn't match if this access requires the component but
                 // doesn't contain it
                 AccessKind::Component { info, required: true }
-                    if !components.contains(info) =>
+                    if !components.contains(info.id()) =>
                 {
                     return false;
                 },
@@ -148,20 +137,6 @@ impl WorldAccess {
         }
 
         true
-    }
-
-    /// Returns a builder for adding new access to this set.
-    pub fn into_builder(self, world: &World) -> WorldAccessBuilder<'_> {
-        WorldAccessBuilder { world, output: self }
-    }
-}
-
-impl<'w> WorldAccessBuilder<'w> {
-    /// Creates a new world access builder.
-    pub const fn new(world: &'w World) -> Self {
-        let output = WorldAccess::new();
-
-        Self { world, output }
     }
 
     /// Adds a world borrow to the set.
@@ -179,7 +154,7 @@ impl<'w> WorldAccessBuilder<'w> {
     /// If you don't require the component to exist, use
     /// [`WorldAccessBuilder::maybe_borrows_component`].
     pub fn borrows_component<C: Component>(&mut self, level: Level) {
-        let info = self.world.components.register::<C>();
+        let info = ComponentInfo::of::<C>();
 
         self.add(Access::required_component(info, level));
     }
@@ -189,7 +164,7 @@ impl<'w> WorldAccessBuilder<'w> {
     /// If you require the component to exist, use
     /// [`WorldAccessBuilder::borrows_component`].
     pub fn maybe_borrows_component<C: Component>(&mut self, level: Level) {
-        let info = self.world.components.register::<C>();
+        let info = ComponentInfo::of::<C>();
 
         self.add(Access::component(info, level));
     }
@@ -199,7 +174,7 @@ impl<'w> WorldAccessBuilder<'w> {
     /// If you don't require the component to exist, use
     /// [`WorldAccessBuilder::maybe_borrows_component`].
     pub fn borrows_resource<R: Resource>(&mut self, level: Level) {
-        let info = self.world.resources.register::<R>();
+        let info = ResourceInfo::of::<R>();
 
         self.add(Access::required_resource(info, level));
     }
@@ -209,51 +184,41 @@ impl<'w> WorldAccessBuilder<'w> {
     /// If you require the component to exist, use
     /// [`WorldAccessBuilder::borrows_component`].
     pub fn maybe_borrows_resource<R: Resource>(&mut self, level: Level) {
-        let info = self.world.resources.register::<R>();
+        let info = ResourceInfo::of::<R>();
 
         self.add(Access::resource(info, level));
     }
 
-    /// Builds the world access.
-    pub fn build(self) -> WorldAccess {
-        self.output
-    }
-
     fn add(&mut self, access: Access) {
-        if self.output.error.is_some() {
+        if self.error.is_some() {
             return;
         }
 
-        self.output.level = self.output.level.max(Some(access.level));
+        self.level = self.level.max(Some(access.level));
 
         let mut error = None;
 
-        for existing_access in self.output.accesses() {
+        for existing_access in self.accesses() {
             if access.conflicts_with(existing_access) {
                 error = Some(AccessError { lhs: access, rhs: existing_access });
                 break;
             }
         }
 
-        if let Some(conflict) = error {
-            self.output.error = Some(conflict);
-            return;
-        }
+        self.error = error;
 
         match access.kind {
-            AccessKind::World => self.output.world = Some(access.level),
-            AccessKind::AllEntities => {
-                self.output.all_entities = Some(access.level)
-            },
+            AccessKind::World => self.world = Some(access.level),
+            AccessKind::AllEntities => self.all_entities = Some(access.level),
             AccessKind::Component { info, required } => {
-                self.output.components.insert(ComponentAccess {
+                self.components.insert(ComponentAccess {
                     info,
                     level: access.level,
                     required,
                 });
             },
             AccessKind::Resource { info, required } => {
-                self.output.resources.insert(ResourceAccess {
+                self.resources.insert(ResourceAccess {
                     info,
                     level: access.level,
                     required,
@@ -412,8 +377,8 @@ mod tests {
 
     #[test]
     fn component_aliasing() {
-        let a = ComponentInfo::of::<A>(0);
-        let b = ComponentInfo::of::<B>(1);
+        let a = ComponentInfo::of::<A>();
+        let b = ComponentInfo::of::<B>();
 
         assert!(
             !Access::component(a, Level::Read)
@@ -439,8 +404,8 @@ mod tests {
 
     #[test]
     fn resource_aliasing() {
-        let a = ResourceInfo::of::<A>(0);
-        let b = ResourceInfo::of::<B>(1);
+        let a = ResourceInfo::of::<A>();
+        let b = ResourceInfo::of::<B>();
 
         assert!(
             !Access::resource(a, Level::Read)
@@ -466,7 +431,7 @@ mod tests {
 
     #[test]
     fn entities_conflict_with_components() {
-        let a = ComponentInfo::of::<A>(0);
+        let a = ComponentInfo::of::<A>();
 
         assert!(
             Access::all_entities(Level::Write)
@@ -482,7 +447,7 @@ mod tests {
 
     #[test]
     fn entities_do_not_conflict_with_resources() {
-        let a = ResourceInfo::of::<A>(0);
+        let a = ResourceInfo::of::<A>();
 
         assert!(
             !Access::all_entities(Level::Write)
