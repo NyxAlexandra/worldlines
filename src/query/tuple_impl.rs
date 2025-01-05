@@ -8,8 +8,8 @@ macro_rules! tuple_impl {
             type Output<'w> = ($($d::Output<'w>,)*);
 
             #[allow(unused)]
-            fn world_access(builder: &mut crate::access::WorldAccessBuilder<'_>) {
-                $( $d::world_access(builder) );*
+            fn world_access(access: &mut crate::access::WorldAccess) {
+                $( $d::world_access(access) );*
             }
 
             #[allow(unused)]

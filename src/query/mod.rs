@@ -5,9 +5,9 @@ use std::marker::PhantomData;
 
 use thiserror::Error;
 
-use crate::access::{AccessError, Level, WorldAccess, WorldAccessBuilder};
+use crate::access::{AccessError, Level, WorldAccess};
 use crate::entity::{EntityAddr, EntityId, EntityMut, EntityPtr, EntityRef};
-use crate::prelude::{Component, TableIndex};
+use crate::prelude::{Component, TableId};
 use crate::storage::{SparseIter, SparseSet, TableRow};
 use crate::system::{ReadOnlySystemInput, SystemInput};
 use crate::world::{World, WorldPtr};
@@ -18,18 +18,18 @@ mod tuple_impl;
 pub struct Query<'w, D: QueryData> {
     world: WorldPtr<'w>,
     /// Tables that this query matches.
-    tables: SparseSet<TableIndex>,
+    tables: SparseSet<TableId>,
     _marker: PhantomData<D>,
 }
 
 /// An iterator over data of a query.
 pub struct QueryIter<'w, 's, D: QueryData> {
     world: WorldPtr<'w>,
-    tables: SparseIter<'s, TableIndex>,
+    tables: SparseIter<'s, TableId>,
     /// The amount of matched entities left.
     len: usize,
     /// The current table.
-    table: Option<TableIndex>,
+    table: Option<TableId>,
     /// The current row in the table.
     row: TableRow,
     _marker: PhantomData<D>,
@@ -47,7 +47,7 @@ pub unsafe trait QueryData {
     /// Adds the access of this query data to the set.
     ///
     /// Used to ensure that the query accesses the world safely and correctly.
-    fn world_access(builder: &mut WorldAccessBuilder<'_>);
+    fn world_access(access: &mut WorldAccess);
 
     /// Returns the query output for an entity.
     ///
@@ -95,11 +95,9 @@ impl<'w, D: QueryData> Query<'w, D> {
     /// The world pointer must be valid for this query's access.
     pub unsafe fn new(world: WorldPtr<'w>) -> Result<Self, AccessError> {
         // SAFETY: access to world metadata is always valid
-        let mut builder = WorldAccess::builder(unsafe { world.as_ref() });
+        let mut access = WorldAccess::new();
 
-        D::world_access(&mut builder);
-
-        let access = builder.build();
+        D::world_access(&mut access);
 
         access.result().map(|_| {
             // TODO: optimize
@@ -247,11 +245,8 @@ unsafe impl<D: QueryData> SystemInput for Query<'_, D> {
 
     fn init(_world: &World) -> Self::State {}
 
-    fn world_access(
-        _state: &Self::State,
-        builder: &mut WorldAccessBuilder<'_>,
-    ) {
-        D::world_access(builder);
+    fn world_access(_state: &Self::State, access: &mut WorldAccess) {
+        D::world_access(access);
     }
 
     unsafe fn get<'w, 's>(
@@ -330,8 +325,8 @@ impl<D: QueryData> ExactSizeIterator for QueryIter<'_, '_, D> {}
 unsafe impl<C: Component> QueryData for &C {
     type Output<'w> = &'w C;
 
-    fn world_access(builder: &mut WorldAccessBuilder<'_>) {
-        builder.borrows_component::<C>(Level::Read);
+    fn world_access(access: &mut WorldAccess) {
+        access.borrows_component::<C>(Level::Read);
     }
 
     unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
@@ -352,8 +347,8 @@ unsafe impl<C: Component> ReadOnlyQueryData for &C {}
 unsafe impl<C: Component> QueryData for &mut C {
     type Output<'w> = &'w mut C;
 
-    fn world_access(builder: &mut WorldAccessBuilder<'_>) {
-        builder.borrows_component::<C>(Level::Write);
+    fn world_access(access: &mut WorldAccess) {
+        access.borrows_component::<C>(Level::Write);
     }
 
     unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
@@ -369,8 +364,8 @@ unsafe impl<C: Component> QueryData for &mut C {
 unsafe impl<C: Component> QueryData for Option<&C> {
     type Output<'w> = Option<&'w C>;
 
-    fn world_access(builder: &mut WorldAccessBuilder<'_>) {
-        builder.maybe_borrows_component::<C>(Level::Read);
+    fn world_access(access: &mut WorldAccess) {
+        access.maybe_borrows_component::<C>(Level::Read);
     }
 
     unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
@@ -389,8 +384,8 @@ unsafe impl<C: Component> ReadOnlyQueryData for Option<&C> {}
 unsafe impl<C: Component> QueryData for Option<&mut C> {
     type Output<'w> = Option<&'w mut C>;
 
-    fn world_access(builder: &mut WorldAccessBuilder<'_>) {
-        builder.maybe_borrows_component::<C>(Level::Write);
+    fn world_access(access: &mut WorldAccess) {
+        access.maybe_borrows_component::<C>(Level::Write);
     }
 
     unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
@@ -404,7 +399,7 @@ unsafe impl<C: Component> QueryData for Option<&mut C> {
 unsafe impl QueryData for EntityId {
     type Output<'w> = Self;
 
-    fn world_access(_builder: &mut WorldAccessBuilder<'_>) {}
+    fn world_access(_builder: &mut WorldAccess) {}
 
     unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
         entity.id()
@@ -422,8 +417,8 @@ unsafe impl ReadOnlyQueryData for EntityId {}
 unsafe impl QueryData for EntityRef<'_> {
     type Output<'w> = EntityRef<'w>;
 
-    fn world_access(builder: &mut WorldAccessBuilder<'_>) {
-        builder.borrows_all_entities(Level::Read);
+    fn world_access(access: &mut WorldAccess) {
+        access.borrows_all_entities(Level::Read);
     }
 
     unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {
@@ -442,8 +437,8 @@ unsafe impl ReadOnlyQueryData for EntityRef<'_> {}
 unsafe impl QueryData for EntityMut<'_> {
     type Output<'w> = EntityMut<'w>;
 
-    fn world_access(builder: &mut WorldAccessBuilder<'_>) {
-        builder.borrows_all_entities(Level::Read);
+    fn world_access(access: &mut WorldAccess) {
+        access.borrows_all_entities(Level::Read);
     }
 
     unsafe fn get(entity: EntityPtr<'_>) -> Self::Output<'_> {

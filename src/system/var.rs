@@ -1,5 +1,6 @@
 use super::SystemInput;
-use crate::prelude::{World, WorldAccessBuilder, WorldPtr};
+use crate::access::WorldAccess;
+use crate::prelude::{World, WorldPtr};
 
 /// A system-local variable that is retained between runs.
 #[repr(transparent)]
@@ -35,11 +36,7 @@ unsafe impl<T: Send + Sync + 'static> SystemInput for Var<'_, T> {
         None
     }
 
-    fn world_access(
-        _state: &Self::State,
-        _builder: &mut WorldAccessBuilder<'_>,
-    ) {
-    }
+    fn world_access(_state: &Self::State, _access: &mut WorldAccess) {}
 
     unsafe fn get<'w, 's>(
         state: &'s mut Self::State,

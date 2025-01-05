@@ -3,6 +3,7 @@ use std::ptr::NonNull;
 
 use super::{EntityId, EntityMut, EntityNotFound, EntityRef};
 use crate::component::{Component, ComponentNotFound};
+use crate::prelude::{ComponentInfo, ComponentVTable};
 use crate::world::World;
 
 /// A borrow of an entity and the world it resides in.
@@ -93,7 +94,8 @@ impl<'w> EntityWorld<'w> {
     /// Returns the previous value if there was one.
     pub fn insert<C: Component>(&mut self, component: C) -> Option<C> {
         let world = self.world_mut();
-        let info = world.components.register::<C>();
+        let info = ComponentInfo::of::<C>();
+        let id = info.id();
 
         let old_addr =
             unsafe { world.entities.get(self.id).unwrap_unchecked() };
@@ -104,7 +106,7 @@ impl<'w> EntityWorld<'w> {
                 .components
                 .get_unchecked(old_addr.table)
                 .components()
-                .contains(info)
+                .contains(id)
         } {
             // replace
 
@@ -112,7 +114,7 @@ impl<'w> EntityWorld<'w> {
                 let old_table =
                     world.components.get_unchecked_mut(old_addr.table);
 
-                Some(old_table.replace(old_addr.row, info.index(), component))
+                Some(old_table.replace(old_addr.row, id, component))
             }
         } else {
             // insert new
@@ -130,7 +132,7 @@ impl<'w> EntityWorld<'w> {
                 world.entities.set(self.id, new_addr);
                 world.components.get_unchecked_mut(new_addr.table).write(
                     new_addr.row,
-                    info.index(),
+                    id,
                     component,
                 );
             }
@@ -149,7 +151,8 @@ impl<'w> EntityWorld<'w> {
             C::before_remove(self.as_mut());
 
             let world = self.world_mut();
-            let info = world.components.register::<C>();
+            let info = ComponentInfo::of::<C>();
+            let id = info.id();
 
             let old_addr =
             // SAFETY: this entity exists
@@ -161,13 +164,13 @@ impl<'w> EntityWorld<'w> {
                 // `.contains::<C>()`
                 let prev = unsafe {
                     old_table
-                        .get_unchecked(old_addr.row, info.index())
+                        .get_unchecked(old_addr.row, id)
                         .as_ptr()
                         .cast::<C>()
                         .read()
                 };
                 let new_components =
-                    old_table.components().clone().and_remove(info);
+                    old_table.components().clone().and_remove(id);
 
                 (prev, new_components)
             };

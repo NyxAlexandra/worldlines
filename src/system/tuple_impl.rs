@@ -19,15 +19,15 @@ macro_rules! tuple_impl {
 
             fn init(&mut self, world: &$crate::world::World) {
                 let state = <($($i,)*) as $crate::system::SystemInput>::init(world);
-                let mut builder = $crate::access::WorldAccess::builder(world);
+                let mut access = $crate::access::WorldAccess::new();
 
                 <($($i,)*) as $crate::system::SystemInput>::world_access(
                     &state,
-                    &mut builder,
+                    &mut access,
                 );
 
                 self.state = Some(state);
-                self.access = Some(builder.build());
+                self.access = Some(access);
             }
 
             unsafe fn world_access(&self) -> &$crate::access::WorldAccess {
@@ -94,12 +94,12 @@ macro_rules! tuple_impl {
             fn world_access(
                 state: &Self::State,
                 #[allow(unused)]
-                builder: &mut $crate::access::WorldAccessBuilder<'_>,
+                access: &mut $crate::access::WorldAccess,
             ) {
                 #[allow(non_snake_case)]
                 let ($($i,)*) = state;
 
-                $($i::world_access($i, builder));*
+                $($i::world_access($i, access));*
             }
 
             #[allow(unused_variables, clippy::unused_unit)]

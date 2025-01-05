@@ -1,40 +1,24 @@
 use std::any::TypeId;
 use std::collections::HashMap;
-use std::hash::BuildHasherDefault;
 use std::mem::MaybeUninit;
-use std::sync::{RwLock, RwLockWriteGuard};
 
-use indexmap::IndexMap;
-
-use super::{
-    Bundle,
-    Component,
-    ComponentInfo,
-    ComponentSet,
-    ComponentSetBuilder,
-};
+use super::{Bundle, ComponentSet};
 use crate::entity::{EntityAddr, EntityId};
-use crate::storage::{SparseIndex, Table, TableRow, TypeIdHasher, TypeMap};
+use crate::prelude::ComponentVTable;
+use crate::storage::{SparseIndex, Table, TableRow, TypeIdHasher};
 
 /// Storage for all components.
 #[derive(Debug)]
 pub struct Components {
-    info: RwLock<ComponentRegistry>,
-    bundle_indices: TypeMap<TableIndex>,
-    set_indices: HashMap<ComponentSet, TableIndex>,
+    bundle_indices: HashMap<TypeId, TableId, TypeIdHasher>,
+    set_indices: HashMap<ComponentSet, TableId>,
     tables: Vec<Table>,
 }
-
-// TODO: optimize
-
-/// The type used to store component info.
-pub type ComponentRegistry =
-    IndexMap<TypeId, ComponentInfo, BuildHasherDefault<TypeIdHasher>>;
 
 /// Newtype for the index of a table in [`Components`].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TableIndex(usize);
+pub struct TableId(usize);
 
 impl Components {
     /// Default table capacity.
@@ -42,32 +26,11 @@ impl Components {
 
     /// Creates empty component storage.
     pub fn new() -> Self {
-        let info = RwLock::default();
-        let bundle_indices = TypeMap::default();
+        let bundle_indices = HashMap::default();
         let set_indices = HashMap::with_capacity(Self::DEFAULT_TABLES);
         let tables = Vec::with_capacity(Self::DEFAULT_TABLES);
 
-        Self { info, bundle_indices, set_indices, tables }
-    }
-
-    /// Returns a mutable reference to the component info registry.
-    pub fn registry(&self) -> RwLockWriteGuard<'_, ComponentRegistry> {
-        self.info.write().unwrap()
-    }
-
-    /// Returns the component index for a component [`TypeId`].
-    ///
-    /// Returns `None` if the component hasn't been registered yet.
-    pub fn info_of_id(&self, type_id: TypeId) -> Option<ComponentInfo> {
-        self.info.read().unwrap().get(&type_id).copied()
-    }
-
-    /// Registers a component, returning its info.
-    pub fn register<C: Component>(&self) -> ComponentInfo {
-        let mut registry = self.registry();
-        let next = ComponentInfo::of::<C>(registry.len());
-
-        *registry.entry(TypeId::of::<C>()).or_insert(next)
+        Self { bundle_indices, set_indices, tables }
     }
 
     /// Returns a reference to the table with the given index.
@@ -75,7 +38,7 @@ impl Components {
     /// # Safety
     ///
     /// The table index must refer to an allocated table.
-    pub unsafe fn get_unchecked(&self, index: TableIndex) -> &Table {
+    pub unsafe fn get_unchecked(&self, index: TableId) -> &Table {
         unsafe { self.tables.get_unchecked(index.0) }
     }
 
@@ -84,18 +47,13 @@ impl Components {
     /// # Safety
     ///
     /// The table index must refer to an allocated table.
-    pub unsafe fn get_unchecked_mut(
-        &mut self,
-        index: TableIndex,
-    ) -> &mut Table {
+    pub unsafe fn get_unchecked_mut(&mut self, index: TableId) -> &mut Table {
         unsafe { self.tables.get_unchecked_mut(index.0) }
     }
 
     /// Returns an iterator over the tables in storage.
-    pub fn tables(
-        &self,
-    ) -> impl ExactSizeIterator<Item = (TableIndex, &Table)> {
-        self.tables.iter().enumerate().map(|(i, table)| (TableIndex(i), table))
+    pub fn tables(&self) -> impl ExactSizeIterator<Item = (TableId, &Table)> {
+        self.tables.iter().enumerate().map(|(i, table)| (TableId(i), table))
     }
 
     /// Returns the table for the specified bundle.
@@ -107,16 +65,14 @@ impl Components {
             .get(&TypeId::of::<B>())
             .copied()
             .unwrap_or_else(|| {
-                let mut builder =
-                    ComponentSetBuilder::new(self.info.get_mut().unwrap());
+                let mut components = ComponentSet::new();
 
-                B::components(&mut builder);
+                B::components(&mut components);
 
-                let components = builder.build();
                 let table =
                     self.set_indices.get(&components).copied().unwrap_or_else(
                         || {
-                            let table = TableIndex(self.tables.len());
+                            let table = TableId(self.tables.len());
 
                             self.set_indices.insert(components.clone(), table);
                             self.tables
@@ -147,7 +103,7 @@ impl Components {
         count: usize,
         components: ComponentSet,
     ) -> EntityAddr {
-        let next = TableIndex(self.tables.len());
+        let next = TableId(self.tables.len());
         let table =
             self.set_indices.get(&components).copied().unwrap_or_else(|| {
                 self.set_indices.insert(components.clone(), next);
@@ -204,7 +160,7 @@ impl Components {
             old_table.components().intersection(new_table.components());
 
         for component in intersection.iter() {
-            let component = component.index();
+            let component = component.id();
 
             unsafe {
                 let ptr = old_table.get_unchecked_mut(old_addr.row, component);
@@ -251,7 +207,7 @@ unsafe fn get_unchecked_mut<T>(this: *mut [T], index: usize) -> *mut T {
     unsafe { ptr.add(index) }
 }
 
-impl SparseIndex for TableIndex {
+impl SparseIndex for TableId {
     fn sparse_index(&self) -> usize {
         self.0
     }

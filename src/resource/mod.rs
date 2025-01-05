@@ -6,10 +6,10 @@ use atomic_refcell::{AtomicRef, AtomicRefMut};
 use thiserror::Error;
 pub use worldlines_macros::Resource;
 
-pub(crate) use self::info::*;
+pub use self::info::*;
 pub(crate) use self::storage::*;
-use crate::access::Level;
-use crate::prelude::{World, WorldAccessBuilder, WorldPtr};
+use crate::access::{Level, WorldAccess};
+use crate::prelude::{World, WorldPtr};
 use crate::system::{ReadOnlySystemInput, SystemInput};
 
 mod info;
@@ -18,7 +18,30 @@ mod storage;
 /// Trait for unique ECS values.
 ///
 /// A world can have at most 1 instance of a resource.
-pub trait Resource: Send + Sync + 'static {}
+///
+/// # Safety
+///
+/// The implementation of [`Resource::id`] must use a static
+/// [`ResourceIdCell`] to store the id. The implementation must only create a
+/// [`ResourceIdCell`] for `Self`.
+///
+/// ```
+/// # use worldlines::prelude::*;
+/// #
+/// struct A;
+///
+/// unsafe impl Resource for A {
+///     fn id() -> ResourceId {
+///         static ID: ResourceIdCell<A> = ResourceIdCell::new();
+///
+///         ID.get_or_init()
+///     }
+/// }
+/// ```
+pub unsafe trait Resource: Send + Sync + 'static {
+    /// Returns the id of this resource.
+    fn id() -> ResourceId;
+}
 
 /// A reference to a [resource](Resource) in a world.
 pub struct Res<'w, R: Resource> {
@@ -91,11 +114,8 @@ unsafe impl<R: Resource> SystemInput for Res<'_, R> {
 
     fn init(_world: &World) -> Self::State {}
 
-    fn world_access(
-        _state: &Self::State,
-        builder: &mut WorldAccessBuilder<'_>,
-    ) {
-        builder.borrows_resource::<R>(Level::Read);
+    fn world_access(_state: &Self::State, access: &mut WorldAccess) {
+        access.borrows_resource::<R>(Level::Read);
     }
 
     unsafe fn get<'w, 's>(
@@ -122,11 +142,8 @@ unsafe impl<R: Resource> SystemInput for ResMut<'_, R> {
 
     fn init(_world: &World) -> Self::State {}
 
-    fn world_access(
-        _state: &Self::State,
-        builder: &mut WorldAccessBuilder<'_>,
-    ) {
-        builder.borrows_resource::<R>(Level::Write);
+    fn world_access(_state: &Self::State, access: &mut WorldAccess) {
+        access.borrows_resource::<R>(Level::Write);
     }
 
     unsafe fn get<'w, 's>(
@@ -150,11 +167,8 @@ unsafe impl<R: Resource> SystemInput for Option<Res<'_, R>> {
 
     fn init(_world: &World) -> Self::State {}
 
-    fn world_access(
-        _state: &Self::State,
-        builder: &mut WorldAccessBuilder<'_>,
-    ) {
-        builder.maybe_borrows_resource::<R>(Level::Read);
+    fn world_access(_state: &Self::State, access: &mut WorldAccess) {
+        access.maybe_borrows_resource::<R>(Level::Read);
     }
 
     unsafe fn get<'w, 's>(
@@ -180,11 +194,8 @@ unsafe impl<R: Resource> SystemInput for Option<ResMut<'_, R>> {
 
     fn init(_world: &World) -> Self::State {}
 
-    fn world_access(
-        _state: &Self::State,
-        builder: &mut WorldAccessBuilder<'_>,
-    ) {
-        builder.maybe_borrows_resource::<R>(Level::Write);
+    fn world_access(_state: &Self::State, access: &mut WorldAccess) {
+        access.maybe_borrows_resource::<R>(Level::Write);
     }
 
     unsafe fn get<'w, 's>(

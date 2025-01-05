@@ -1,8 +1,8 @@
 use super::{Commands, EntityQueue};
-use crate::access::Level;
+use crate::access::{Level, WorldAccess};
 use crate::component::Bundle;
 use crate::entity::{Entities, EntityId, EntityNotFound};
-use crate::prelude::{WorldAccessBuilder, WorldPtr};
+use crate::prelude::WorldPtr;
 use crate::system::{ReadOnlySystemInput, SystemInput};
 use crate::world::World;
 
@@ -69,11 +69,8 @@ unsafe impl SystemInput for WorldQueue<'_, '_> {
         Commands::new()
     }
 
-    fn world_access(
-        _state: &Self::State,
-        builder: &mut WorldAccessBuilder<'_>,
-    ) {
-        builder.borrows_world(Level::Read);
+    fn world_access(_state: &Self::State, access: &mut WorldAccess) {
+        access.borrows_world(Level::Read);
     }
 
     unsafe fn get<'w, 's>(
