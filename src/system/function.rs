@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use super::SystemInput;
 use crate::access::WorldAccess;
 
-/// A type that wraps functions to implement [`System`].
+/// A type that wraps functions to implement [`System`](super::System).
 pub struct FunctionSystem<I, O, F>
 where
     I: SystemInput,

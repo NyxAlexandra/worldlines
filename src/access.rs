@@ -152,7 +152,7 @@ impl WorldAccess {
     /// Adds a required component borrow to the set.
     ///
     /// If you don't require the component to exist, use
-    /// [`WorldAccessBuilder::maybe_borrows_component`].
+    /// [`WorldAccess::maybe_borrows_component`].
     pub fn borrows_component<C: Component>(&mut self, level: Level) {
         let info = ComponentInfo::of::<C>();
 
@@ -162,7 +162,7 @@ impl WorldAccess {
     /// Adds a non-required component borrow to the set.
     ///
     /// If you require the component to exist, use
-    /// [`WorldAccessBuilder::borrows_component`].
+    /// [`WorldAccess::borrows_component`].
     pub fn maybe_borrows_component<C: Component>(&mut self, level: Level) {
         let info = ComponentInfo::of::<C>();
 
@@ -172,7 +172,7 @@ impl WorldAccess {
     /// Adds a required component borrow to the set.
     ///
     /// If you don't require the component to exist, use
-    /// [`WorldAccessBuilder::maybe_borrows_component`].
+    /// [`WorldAccess::maybe_borrows_component`].
     pub fn borrows_resource<R: Resource>(&mut self, level: Level) {
         let info = ResourceInfo::of::<R>();
 
@@ -182,7 +182,7 @@ impl WorldAccess {
     /// Adds a non-required component borrow to the set.
     ///
     /// If you require the component to exist, use
-    /// [`WorldAccessBuilder::borrows_component`].
+    /// [`WorldAccess::borrows_component`].
     pub fn maybe_borrows_resource<R: Resource>(&mut self, level: Level) {
         let info = ResourceInfo::of::<R>();
 
